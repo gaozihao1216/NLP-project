@@ -1,0 +1,124 @@
+\documentclass[UTF8,a4paper,11pt]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\hypersetup{colorlinks=false,pdfborder={0 0 0}}
+
+% 紧凑的章节标题
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{}{0em}{}
+\titlespacing*{\section}{0pt}{1.0ex}{0.4ex}
+\titlespacing*{\subsection}{0pt}{0.6ex}{0.2ex}
+\setlength{\parskip}{0.3ex}
+\setlength{\parindent}{2em}
+
+\title{基于《小兵传奇》的星际战争游戏 Demo 设计}
+\author{小组成员：\underline{\hspace{2.2cm}}（学号：\underline{\hspace{2.0cm}}）\quad
+        \underline{\hspace{2.2cm}}（学号：\underline{\hspace{2.0cm}}）\\[2pt]
+        \underline{\hspace{2.2cm}}（学号：\underline{\hspace{2.0cm}}）}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace*{-2ex}
+
+\begin{abstract}
+\noindent 本项目拟以网络小说《小兵传奇》为世界观蓝本，使用 Unity 引擎与 Blender 资产制作，
+开发一款以星际战争为主题、以阵营成长为主线的可玩游戏 Demo。设计的核心思路是让联邦、银鹰帝国、
+家族三个可玩阵营共享同一套底层业务逻辑（关系网、作战体系与星际地图），
+仅在初始条件与成长资源上产生差异，从而在有限工期内最大化内容复用。
+本文说明选题依据、与已有作品的比较、系统方案与实现计划。
+\end{abstract}
+
+\section{选题与目标}
+
+选择星际战争题材，一方面借鉴《戴森球计划》在生产与规模扩张上的正反馈体验，
+另一方面利用《小兵传奇》已具备的完整设定降低世界观构建成本：小说给出了四种政体、
+六等二十一级军衔、A--J 级舰船数值表、两大强国与无乱星系的割据格局，
+以及从新兵到统一宇宙的四阶段主线。这些设定可直接转化为游戏的数值基线与剧情骨架。
+
+我们计划交付一个可操作的游戏 Demo，支持三阵营中的至少一个完整可玩流程，
+玩家通过军功（联邦、银鹰）或资源扩张（家族）逐步成长，并在后期进入相同的资源与政治博弈层。
+AI 的应用落在游戏内部——以小说中的人格化中央电脑「星零」为原型设计 AI 副官，
+提供战术建议与情报分析；本项目不以 AI 算法 novelty 为目标，评估标准是 Demo 本身的完成度与可玩性。
+
+\section{相关工作与比较}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{l l l}
+\toprule
+作品 & 核心机制 & 与本项目的差异 \\
+\midrule
+戴森球计划 & 自动化生产链、规模扩张 & 本项目以阵营博弈与叙事分支为核心，生产仅为后勤一环 \\
+Homeworld & 舰队战术、立体空间指挥 & 本项目叠加关系网与成长系统，作战只是其中一层 \\
+Stellaris & 4X 大战略、外交与派系 & 本项目聚焦单局角色成长，不做全局 4X 模拟 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+三者分别覆盖了生产、战术与战略，但都缺少「角色在派系政治中成长」这一叙事驱动层。
+本项目的差异点在于：以小说剧情为剧本，将军功、资源与关系网数值绑定到剧情分支，
+并让三个阵营复用公共模块以降低实现成本。
+
+\section{方案设计}
+
+\subsection{共享底层架构}
+三个阵营共用三个公共模块，业务逻辑只实现一次：
+\begin{enumerate}[leftmargin=1.6em,itemsep=0pt]
+  \item \textbf{关系网}：以人物、派系、机构为节点，以忠诚、猜疑、利益、军功归属为边；
+        支持拉拢、举报、联姻、任免等交互，并驱动剧情分支。
+  \item \textbf{作战体系}：舰船分级数值表（含白鲸、X 舰等特种舰）作为科技树与编成基础，
+        军种之间形成克制关系；AI 副官在此层给出战术建议。
+  \item \textbf{星际地图}：星系/行政星两级结构，空间跳跃与边境屏障决定移动规则，
+        补给线与资源产地支撑后勤调度。
+\end{enumerate}
+
+\subsection{三阵营的差异与平衡}
+联邦线以唐龙视角展开，前期由高层承担资源调度，玩家专注作战，需应对军功被冒领与派系倾轧；
+银鹰线前期类似，但下属绝对忠诚，矛盾来自皇子夺嫡与贵族站队；
+家族线从零开始经营资源与工业，自由度高但关系简单。
+三条线前期水平相当：作战线省心于后勤，家族线省心于政治；
+成长路线同构，后期玩家晋升高层后统一进入资源与政治博弈，系统合流。
+
+\subsection{故事走向与资源调度}
+主线按小说四阶段矛盾组织：新兵期、无乱星系立国、反唐联盟、统一宇宙。
+设置 2--3 个改变结局的关键抉择，由关系网、军功与资源存量共同触发。
+资源采用统一底层（资金、稀有金属、舰船、人口、能源），仅暴露时机不同：
+前两条线由高层代管，家族线全面可见；数值取自小说（如自走炮舰 2 亿、X 舰 2000 亿联邦币、税率约 10\%）。
+
+\section{实现计划与分工}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{l l l}
+\toprule
+阶段 & 任务 & 产出 \\
+\midrule
+第 1--2 周 & 设定梳理、原型设计 & 三份设定分析文档、系统架构图、可点击原型 \\
+第 3--6 周 & 公共模块开发 & 关系网、作战、地图三个模块的可运行版本 \\
+第 7--10 周 & 阵营内容与剧情接入 & 至少一个阵营的完整流程、AI 副官原型 \\
+第 11--12 周 & 联调、测试与展示 & 可玩 Demo、演示视频 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{分工}：成员 A 负责作战体系与地图；成员 B 负责关系网与剧情；
+成员 C 负责 AI 副官、美术资产与整合。（姓名按实际组员填写。）
+
+\textbf{资源估计}：人力 3 人，工期约 12 周；技术栈为 Unity（运行时）+ Blender（资产制作，导出 glTF/FBX）。
+主要资源需求为开发机器与美术素材，无额外算力或数据采购需求。
+
+\textbf{前期结果}：已完成《小兵传奇》全文梳理，产出故事线、作战体系、经济与社会设定三份分析文档，
+并制作了概念海报一张；舰船数值表与军衔体系已整理为可直接导入游戏的数据。
+
+\section{AI 使用声明}
+本 proposal 的撰写过程中使用了 AI 助手：用于梳理小说文本、提取设定并整理为分析文档，
+以及辅助文字表述与结构组织。选题方向、系统设计决策与最终内容由小组成员确定并核对。
+
+\end{document}

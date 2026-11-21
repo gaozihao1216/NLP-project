@@ -1,0 +1,14 @@
+Proposal 要求:
+• 请使用LaTeX写（具体template不做限定），单栏，英文，以PDF形式提交。你可以提交supplementary material，但助教不保证会看。
+• 对project的general要求请见part 1的课件 (p16-p28)。
+• 只要内容reasonable就会至少获得3分，会考虑的加分项包括但不限于：清晰的阐述，逻辑，计划，分工，示意图，对需要资源的估计，前期结果等。
+• 在最后说一下写这个proposal的过程中对AI的使用情况。
+• 正文（不包括参考文献和appendix）篇幅在1.5页左右，不得超过3页。你可以加appendix，但助教不保证会看。
+• 每组只用提交一份proposal，请在最开始写清小组成员名单，加上每个人的学号。
+• 最终report不必与proposal保持一致，方法甚至研究的问题都可以改动。从我们批改的角度来说, final report和proposal是独立的两件事。
+• 重申一下（1）对于research项目，我们不强求novelty，但你需要阐述清楚与已有literature的区别以及你的work的意义。（2）如果是做游戏demo，那我们只关心成品作为一个游戏demo的质量，可以和AI research完全没有关系。
+
+Proposal 内容需包括：
+1. 想要研究的问题/想做的游戏
+2. 初步的文献调研/与类似游戏的比较
+3. 提出可能的方案与计划

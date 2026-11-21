@@ -1,0 +1,9 @@
+# LaTeX 编译中间产物
+*.aux
+*.log
+*.out
+*.toc
+*.bak
+
+# WorkBuddy 工作记录
+.workbuddy/

@@ -1,0 +1,12 @@
+{
+  "name": "StarPawn.Narrative.Domain",
+  "rootNamespace": "StarPawn.Narrative.Domain",
+  "references": [
+    "StarPawn.Narrative.Contracts",
+    "StarPawn.Foundation"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

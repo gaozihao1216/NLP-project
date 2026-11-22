@@ -1,0 +1,11 @@
+{
+  "name": "StarPawn.Officer.Contracts",
+  "rootNamespace": "StarPawn.Officer.Contracts",
+  "references": [
+    "StarPawn.Foundation"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

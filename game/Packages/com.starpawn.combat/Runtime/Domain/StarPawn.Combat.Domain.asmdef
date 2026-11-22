@@ -1,0 +1,12 @@
+{
+  "name": "StarPawn.Combat.Domain",
+  "rootNamespace": "StarPawn.Combat.Domain",
+  "references": [
+    "StarPawn.Combat.Contracts",
+    "StarPawn.Foundation"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.combat",
+  "version": "0.1.0",
+  "displayName": "StarPawn Combat",
+  "description": "实时战斗仿真",
+  "unity": "2021.3",
+  "dependencies": {}
+}

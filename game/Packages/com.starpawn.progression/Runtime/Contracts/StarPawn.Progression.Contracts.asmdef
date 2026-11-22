@@ -1,0 +1,11 @@
+{
+  "name": "StarPawn.Progression.Contracts",
+  "rootNamespace": "StarPawn.Progression.Contracts",
+  "references": [
+    "StarPawn.Foundation"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

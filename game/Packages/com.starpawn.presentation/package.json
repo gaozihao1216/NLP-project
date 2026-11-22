@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.presentation",
+  "version": "0.1.0",
+  "displayName": "StarPawn Presentation",
+  "description": "Unity 表现层",
+  "unity": "2021.3",
+  "dependencies": {}
+}

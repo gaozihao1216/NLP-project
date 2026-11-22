@@ -1,0 +1,9 @@
+{
+  "name": "StarPawn.Foundation",
+  "rootNamespace": "StarPawn.Foundation",
+  "references": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

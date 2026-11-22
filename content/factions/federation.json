@@ -1,0 +1,9 @@
+{
+  "id": "faction.federation",
+  "name": "万罗联邦",
+  "growthMode": "Merit",
+  "resourceVisibility": "CombatOnly",
+  "highCommandCoversSupply": true,
+  "relationPreset": "HighSuspicion",
+  "storyRoute": "tanglong"
+}

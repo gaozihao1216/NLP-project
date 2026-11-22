@@ -1,0 +1,22 @@
+{
+  "name": "StarPawn.Bootstrap",
+  "rootNamespace": "StarPawn.Bootstrap",
+  "references": [
+    "StarPawn.Application",
+    "StarPawn.Presentation",
+    "StarPawn.Infrastructure",
+    "StarPawn.Navigation.Domain",
+    "StarPawn.Fleet.Domain",
+    "StarPawn.Economy.Domain",
+    "StarPawn.Progression.Domain",
+    "StarPawn.Relations.Domain",
+    "StarPawn.Narrative.Domain",
+    "StarPawn.Combat.Domain",
+    "StarPawn.Officer.Domain",
+    "StarPawn.Foundation"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

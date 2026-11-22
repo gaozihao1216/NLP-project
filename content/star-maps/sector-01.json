@@ -1,0 +1,8 @@
+{
+  "id": "map.sector_01",
+  "nodes": [
+    { "id": "sys.kaila", "name": "凯拉星系", "neighbors": ["sys.zhongzhou"] },
+    { "id": "sys.zhongzhou", "name": "中州星", "neighbors": ["sys.kaila"] }
+  ],
+  "note": "MVP 只用 2 个节点，验证移动与遭遇"
+}

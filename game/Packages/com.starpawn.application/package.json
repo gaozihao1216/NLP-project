@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.application",
+  "version": "0.1.0",
+  "displayName": "StarPawn Application",
+  "description": "应用层工作流与编排",
+  "unity": "2021.3",
+  "dependencies": {}
+}

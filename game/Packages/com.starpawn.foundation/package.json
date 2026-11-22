@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.foundation",
+  "version": "0.1.0",
+  "displayName": "StarPawn Foundation",
+  "description": "基础类型与 ID/时间/随机源",
+  "unity": "2021.3",
+  "dependencies": {}
+}

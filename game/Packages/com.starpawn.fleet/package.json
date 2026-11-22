@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.fleet",
+  "version": "0.1.0",
+  "displayName": "StarPawn Fleet",
+  "description": "舰队编成与持久舰船状态",
+  "unity": "2021.3",
+  "dependencies": {}
+}

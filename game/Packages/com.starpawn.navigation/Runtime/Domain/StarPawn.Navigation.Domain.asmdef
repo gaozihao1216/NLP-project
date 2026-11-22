@@ -1,0 +1,12 @@
+{
+  "name": "StarPawn.Navigation.Domain",
+  "rootNamespace": "StarPawn.Navigation.Domain",
+  "references": [
+    "StarPawn.Navigation.Contracts",
+    "StarPawn.Foundation"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

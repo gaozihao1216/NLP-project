@@ -1,0 +1,33 @@
+{
+  "id": "quest.first_contact",
+  "title": "边境侦察",
+  "category": "main",
+  "order": 1,
+  "initialStatus": "available",
+  "summary": "前往边境前哨，击毁敌方巡逻编队。",
+  "description": "联邦边境星域出现不明舰踪。上级命令你率分队前出侦察，清除敌方巡逻舰。这是你的第一次实战。",
+  "references": {
+    "missionId": "mission.first_contact",
+    "startStoryNode": "ch1.intro",
+    "endStoryNode": "ch1.after_battle"
+  },
+  "prerequisites": {
+    "allOf": [
+      { "type": "StoryNodeReached", "value": "ch1.intro" }
+    ]
+  },
+  "objectives": [
+    { "id": "obj.travel", "text": "航行至边境前哨（中州星）", "kind": "ReachSystem", "targetId": "sys.zhongzhou" },
+    { "id": "obj.engage", "text": "击毁敌方巡逻编队", "kind": "CompleteMission", "targetId": "mission.first_contact" },
+    { "id": "obj.report", "text": "返回复命", "kind": "StoryNodeReached", "targetId": "ch1.after_battle" }
+  ],
+  "currentObjectiveId": "obj.travel",
+  "navigation": {
+    "targetSystemId": "sys.zhongzhou",
+    "markerType": "objective",
+    "showDistance": true,
+    "hint": "在星图中选择高亮星系，开始航行。抵达后将触发战斗。"
+  },
+  "rewardsHint": { "merit": 35, "credits": 200 },
+  "unlocks": ["quest.political_choice"]
+}

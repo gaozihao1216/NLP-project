@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.officer",
+  "version": "0.1.0",
+  "displayName": "StarPawn Officer",
+  "description": "星零副官",
+  "unity": "2021.3",
+  "dependencies": {}
+}

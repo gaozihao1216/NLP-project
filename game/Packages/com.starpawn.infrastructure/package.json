@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.infrastructure",
+  "version": "0.1.0",
+  "displayName": "StarPawn Infrastructure",
+  "description": "内容加载、存档、对话服务",
+  "unity": "2021.3",
+  "dependencies": {}
+}

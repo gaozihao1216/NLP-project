@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.relations",
+  "version": "0.1.0",
+  "displayName": "StarPawn Relations",
+  "description": "人物派系关系与政治",
+  "unity": "2021.3",
+  "dependencies": {}
+}

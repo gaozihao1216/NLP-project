@@ -1,0 +1,9 @@
+{
+  "id": "faction.clan",
+  "name": "家族势力",
+  "growthMode": "Resource",
+  "resourceVisibility": "Full",
+  "highCommandCoversSupply": false,
+  "relationPreset": "LoyalRetainers",
+  "storyRoute": "sandbox"
+}

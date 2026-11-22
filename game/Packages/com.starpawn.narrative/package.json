@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.narrative",
+  "version": "0.1.0",
+  "displayName": "StarPawn Narrative",
+  "description": "任务、剧情节点与分支",
+  "unity": "2021.3",
+  "dependencies": {}
+}

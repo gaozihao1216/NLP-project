@@ -1,0 +1,30 @@
+{
+  "id": "quest.imperial_trial",
+  "title": "帝国忠诚试炼",
+  "category": "main",
+  "order": 1,
+  "initialStatus": "available",
+  "summary": "银鹰帝国阵营示例任务：通过边境冲突证明忠诚。",
+  "description": "同一套任务结构承载不同阵营的示例。银鹰路线以绝对忠诚为起点，后续可展开皇子夺嫡。此任务仅验证配置驱动，不含完整剧情。",
+  "references": {
+    "missionId": "mission.first_contact"
+  },
+  "factionOverride": "faction.empire",
+  "prerequisites": {
+    "allOf": [
+      { "type": "FactionSelected", "value": "faction.empire" }
+    ]
+  },
+  "objectives": [
+    { "id": "obj.sortie", "text": "率队出击，击退来犯舰只", "kind": "CompleteMission", "targetId": "mission.first_contact" }
+  ],
+  "currentObjectiveId": "obj.sortie",
+  "navigation": {
+    "targetSystemId": "sys.zhongzhou",
+    "markerType": "objective",
+    "showDistance": true,
+    "hint": "前往边境星域。"
+  },
+  "rewardsHint": { "merit": 30 },
+  "note": "阵营示例，非完整剧情"
+}

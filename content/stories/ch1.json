@@ -1,0 +1,21 @@
+{
+  "id": "story.ch1",
+  "nodes": {
+    "ch1.intro": {
+      "speaker": "机器人教官",
+      "text": "你为什么想当兵？",
+      "choices": [
+        { "id": "obey", "text": "服从训练，争取军功", "next": "ch1.after_battle" },
+        { "id": "resist", "text": "拒绝服从", "condition": "loyaltyBelowThreshold", "next": "ch1.conflict" }
+      ]
+    },
+    "ch1.after_battle": {
+      "speaker": "奥姆斯特元帅",
+      "text": "这一仗打得不错。想好站哪边了吗？",
+      "choices": [
+        { "id": "report_merit", "text": "上报战功", "effects": [{ "kind": "GrantMerit", "amount": 20 }] },
+        { "id": "court_faction", "text": "接近派系", "effects": [{ "kind": "AdjustRelation", "targetId": "npc.chenyu", "amount": 10 }] }
+      ]
+    }
+  }
+}

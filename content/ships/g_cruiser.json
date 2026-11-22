@@ -1,0 +1,16 @@
+{
+  "id": "ship.g_cruiser",
+  "name": "G级巡洋舰",
+  "source": "小说第34章舰船数值表",
+  "base": { "crew": 1200, "mainGun": 100, "subGun": 60, "defense": 100 },
+  "combat": {
+    "maxSpeed": 20,
+    "turnRate": 20,
+    "gunRange": 320,
+    "shellVelocity": 300,
+    "reloadSeconds": 6.0,
+    "armor": { "coreMultiplier": 1.0, "outerMultiplier": 0.4, "ricochetAngleDeg": 30 },
+    "hp": 800
+  },
+  "note": "航行与装甲参数小说未给出，需原型阶段按手感调平衡"
+}

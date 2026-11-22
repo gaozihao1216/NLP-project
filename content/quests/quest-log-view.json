@@ -1,0 +1,21 @@
+{
+  "id": "quest.log_view",
+  "note": "任务日志的显示规则。表现层消费；分组与显示策略放配置，不写死在代码里。",
+  "sections": [
+    { "id": "main", "title": "主线", "order": 1 },
+    { "id": "side", "title": "支线", "order": 2 },
+    { "id": "contract", "title": "委托", "order": 3 }
+  ],
+  "statusFilter": {
+    "showAvailable": true,
+    "showActive": true,
+    "showCompleted": false,
+    "showFailed": false
+  },
+  "maxTracked": 1,
+  "navigation": {
+    "showRouteInStarMap": true,
+    "showDistance": true,
+    "showHudMarker": true
+  }
+}

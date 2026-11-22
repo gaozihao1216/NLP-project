@@ -1,0 +1,19 @@
+{
+  "name": "StarPawn.Application",
+  "rootNamespace": "StarPawn.Application",
+  "references": [
+    "StarPawn.Foundation",
+    "StarPawn.Navigation.Contracts",
+    "StarPawn.Fleet.Contracts",
+    "StarPawn.Economy.Contracts",
+    "StarPawn.Progression.Contracts",
+    "StarPawn.Relations.Contracts",
+    "StarPawn.Narrative.Contracts",
+    "StarPawn.Combat.Contracts",
+    "StarPawn.Officer.Contracts"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

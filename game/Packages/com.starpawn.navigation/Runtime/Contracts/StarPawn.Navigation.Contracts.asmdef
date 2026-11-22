@@ -1,0 +1,11 @@
+{
+  "name": "StarPawn.Navigation.Contracts",
+  "rootNamespace": "StarPawn.Navigation.Contracts",
+  "references": [
+    "StarPawn.Foundation"
+  ],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

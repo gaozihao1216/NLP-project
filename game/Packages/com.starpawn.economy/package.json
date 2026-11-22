@@ -1,0 +1,8 @@
+{
+  "name": "com.starpawn.economy",
+  "version": "0.1.0",
+  "displayName": "StarPawn Economy",
+  "description": "账户、库存、补给",
+  "unity": "2021.3",
+  "dependencies": {}
+}

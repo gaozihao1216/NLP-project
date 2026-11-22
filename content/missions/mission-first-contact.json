@@ -1,0 +1,8 @@
+{
+  "id": "mission.first_contact",
+  "title": "边境侦察",
+  "brief": "前往边境前哨，击毁敌方巡逻编队。",
+  "objective": { "kind": "DestroyAll", "enemyGroupId": "group.patrol_01" },
+  "rewards": { "merit": 35, "credits": 200 },
+  "nextStoryNode": "ch1.after_battle"
+}

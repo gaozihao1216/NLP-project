@@ -1,0 +1,32 @@
+{
+  "id": "quest.political_choice",
+  "title": "站哪一边",
+  "category": "side",
+  "order": 1,
+  "initialStatus": "locked",
+  "summary": "战后有人开始注意你。决定与谁靠近。",
+  "description": "奥姆斯特元帅的暗示、陈宇的猜疑——军功之外，关系网同样决定你的晋升速度。",
+  "references": {
+    "storyNode": "ch1.after_battle"
+  },
+  "prerequisites": {
+    "allOf": [
+      { "type": "QuestCompleted", "value": "quest.first_contact" }
+    ]
+  },
+  "objectives": [
+    { "id": "obj.decide", "text": "做出选择：上报战功，或接近派系", "kind": "StoryChoice", "targetId": "ch1.after_battle" }
+  ],
+  "currentObjectiveId": "obj.decide",
+  "navigation": {
+    "targetSystemId": "sys.kaila",
+    "markerType": "npc",
+    "showDistance": false,
+    "hint": "返回凯拉星系，与元帅对话。"
+  },
+  "rewardsHint": { "merit": 20 },
+  "consequences": [
+    { "choice": "report_merit", "effect": "GrantMerit", "amount": 20 },
+    { "choice": "court_faction", "effect": "AdjustRelation", "targetId": "npc.chenyu", "amount": 10 }
+  ]
+}

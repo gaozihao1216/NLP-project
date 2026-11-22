@@ -1,0 +1,15 @@
+{
+  "id": "ship.a_patrol",
+  "name": "A级巡逻艇",
+  "source": "小说第34章舰船数值表",
+  "base": { "crew": 40, "mainGun": 20, "subGun": 10, "defense": 20 },
+  "combat": {
+    "maxSpeed": 32,
+    "turnRate": 45,
+    "gunRange": 180,
+    "shellVelocity": 220,
+    "reloadSeconds": 3.2,
+    "armor": { "coreMultiplier": 1.0, "outerMultiplier": 0.4, "ricochetAngleDeg": 25 },
+    "hp": 120
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "quest.clan_contract",
+  "title": "家族补给委托",
+  "category": "contract",
+  "order": 1,
+  "initialStatus": "available",
+  "summary": "家族势力示例任务：靠资源膨胀成长。",
+  "description": "与军功路线不同，家族阵营从经营起步。此任务只验证『委托』分组与资源型任务能进入同一套日志，不含完整经济玩法。",
+  "references": {},
+  "factionOverride": "faction.clan",
+  "prerequisites": {
+    "allOf": [
+      { "type": "FactionSelected", "value": "faction.clan" }
+    ]
+  },
+  "objectives": [
+    { "id": "obj.deliver", "text": "向边境前哨运送补给", "kind": "ReachSystem", "targetId": "sys.zhongzhou" }
+  ],
+  "currentObjectiveId": "obj.deliver",
+  "navigation": {
+    "targetSystemId": "sys.zhongzhou",
+    "markerType": "poi",
+    "showDistance": true,
+    "hint": "抵达后自动交付。"
+  },
+  "rewardsHint": { "credits": 300, "alloy": 50 },
+  "note": "阵营示例，非完整玩法"
+}

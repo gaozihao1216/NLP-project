@@ -93,7 +93,7 @@ internal static class Program
             var spec = f.LaunchBattle(new[] { new EntityId("enemy.001") });
             FinishBattle(s, f, spec.BattleId);
             f.SettleBattle(spec.BattleId);
-            f.ReadStory(); // Evaluate 推进到 ch1.after_battle
+            f.ReadStory(); // 结算里的 Evaluate 已推进节点，这里只读
             int meritBefore = s.Progression.Read().Merit;
             var c1 = f.ChooseStoryOption(new StoryChoiceId("report_merit"));
             int afterFirst = s.Progression.Read().Merit;
@@ -180,6 +180,80 @@ internal static class Program
             var ok = f.TravelToSystem(new EntityId("sys.zhongzhou"));
             Check("航行事务成功", ok.Success);
             Check("高层代管关闭时补给被扣", Credits(s) == before - 20, "before=" + before + " now=" + Credits(s));
+        }
+
+        // 11. 战斗契约校验：四分队上限、能量非负、合法输入
+        {
+            GameServices s; CampaignFacade f; s = Build(out f);
+            var spec = f.LaunchBattle(new[] { new EntityId("enemy.001") });
+            Check("合法战斗输入通过校验", BattleRules.ValidateSpec(spec).Success);
+
+            var bad = new BattleStartSpec
+            {
+                BattleId = new EntityId("battle.bad"),
+                Allies = new[] { new FleetEntry
+                {
+                    ShipId = new EntityId("ship.x"), Stats = ResolvedShipStats.Default,
+                    InheritedHull01 = 1f, SquadIndex = BattleRules.MaxSquads
+                } },
+                Enemies = new FleetEntry[0],
+                FixedStep = 1f / 30f
+            };
+            Check("超过四分队被拒绝", BattleRules.ValidateSpec(bad).Error.Code == "SQUAD_OUT_OF_RANGE");
+            Check("负能量投入被拒绝",
+                !BattleRules.ValidatePower(new PowerAllocationCommand
+                { Propulsion = 1.2f, Shield = -0.2f, Weapons = 0f }).Success);
+            Check("合法三路能量通过",
+                BattleRules.ValidatePower(new PowerAllocationCommand
+                { Propulsion = 0.3f, Shield = 0.3f, Weapons = 0.4f }).Success);
+        }
+
+        // 12. 剧情推进失败也必须整体回滚，且回滚后可重试
+        {
+            GameServices s; CampaignFacade f; s = Build(out f);
+            var spec = f.LaunchBattle(new[] { new EntityId("enemy.001") });
+            FinishBattle(s, f, spec.BattleId);
+            int creditsBefore = Credits(s);
+            int meritBefore = s.Progression.Read().Merit;
+            string nodeBefore = f.ReadStory().NodeId;
+            StarPawn.Narrative.Domain.FakeNarrativeRuntime.ForceFailNextEvaluate = true;
+            var r = f.SettleBattle(spec.BattleId);
+            Check("剧情推进失败导致结算失败", !r.Success && r.Error.Code == "EVALUATE_FORCED", r.Error.Code);
+            Check("剧情失败后资源回滚", Credits(s) == creditsBefore);
+            Check("剧情失败后军功回滚", s.Progression.Read().Merit == meritBefore);
+            Check("剧情失败后节点回滚", f.ReadStory().NodeId == nodeBefore);
+            Check("剧情失败后可重试成功", f.SettleBattle(spec.BattleId).Success);
+        }
+
+        // 13. 胜利后果：星系管辖 + 残骸缴获，都在同一事务内
+        {
+            GameServices s; CampaignFacade f; s = Build(out f);
+            var target = new EntityId("sys.zhongzhou");
+            var spec = f.LaunchBattle(new[] { new EntityId("enemy.001") }, target);
+            int alloyBefore = 0;
+            foreach (var b in s.Economy.Read().Balances) if (b.Kind == ResourceKind.Alloy) alloyBefore = b.Amount;
+            FinishBattle(s, f, spec.BattleId);
+            var r = f.SettleBattle(spec.BattleId);
+            Check("胜利结算成功", r.Success, r.Error.Code);
+            bool claimed = false;
+            foreach (var sys in f.ReadNavigation().KnownSystems)
+                if (sys.SystemId == target && sys.IsVisited) claimed = true;
+            Check("胜利后主张星系管辖", claimed);
+            int alloyAfter = 0;
+            foreach (var b in s.Economy.Read().Balances) if (b.Kind == ResourceKind.Alloy) alloyAfter = b.Amount;
+            Check("胜利后缴获残骸资源", alloyAfter > alloyBefore, "before=" + alloyBefore + " after=" + alloyAfter);
+        }
+
+        // 14. 战斗结果深拷贝：调用方改数组不能污染内部结果
+        {
+            GameServices s; CampaignFacade f; s = Build(out f);
+            var spec = f.LaunchBattle(new[] { new EntityId("enemy.001") });
+            FinishBattle(s, f, spec.BattleId);
+            BattleResult first, second;
+            f.TryGetBattleResult(out first);
+            first.DestroyedEnemyIds[0] = new EntityId("tampered");
+            f.TryGetBattleResult(out second);
+            Check("战斗结果数组深拷贝", second.DestroyedEnemyIds[0] != new EntityId("tampered"));
         }
 
         Console.WriteLine($"\n=== 结果：{_passed} 通过，{_failed} 失败 ===");

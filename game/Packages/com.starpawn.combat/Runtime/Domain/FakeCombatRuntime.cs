@@ -31,6 +31,8 @@ namespace StarPawn.Combat.Domain
         public void Initialize(BattleStartSpec spec)
         {
             if (spec == null) throw new ArgumentNullException(nameof(spec));
+            var check = BattleRules.ValidateSpec(spec);
+            if (!check.Success) throw new ArgumentException(check.Error.ToString(), nameof(spec));
             _spec = spec;
             _started = true;
             _result = null;
@@ -95,14 +97,13 @@ namespace StarPawn.Combat.Domain
             }
             if (command is PowerAllocationCommand power)
             {
-                float sum = power.Propulsion + power.Shield + power.Weapons;
-                if (sum <= 0f || sum > 1.001f)
-                    return CommandResult.Fail("INVALID_POWER", "三路能量比例之和必须为 1");
+                var check = BattleRules.ValidatePower(power);
+                if (!check.Success) return check;
                 _power = new PowerAllocation
                 {
-                    Propulsion = power.Propulsion / sum,
-                    Shield = power.Shield / sum,
-                    Weapons = power.Weapons / sum,
+                    Propulsion = power.Propulsion,
+                    Shield = power.Shield,
+                    Weapons = power.Weapons,
                     Preset = power.Preset
                 };
                 foreach (var s in _snapshot.Ships) s.PowerMode = power.Preset;
@@ -206,16 +207,29 @@ namespace StarPawn.Combat.Domain
             return r;
         }
 
+        /// <summary>深拷贝。结果数组也是内部引用，不能让调用方改了再结算。</summary>
         public bool TryGetResult(out BattleResult result)
         {
-            result = _result == null ? null : new BattleResult
+            if (_result == null) { result = null; return false; }
+            var outcomes = new ShipBattleOutcome[_result.ShipOutcomes.Length];
+            for (int i = 0; i < outcomes.Length; i++)
+                outcomes[i] = new ShipBattleOutcome
+                {
+                    ShipId = _result.ShipOutcomes[i].ShipId,
+                    IsLost = _result.ShipOutcomes[i].IsLost,
+                    HullAfter01 = _result.ShipOutcomes[i].HullAfter01,
+                    AmmoRemaining = _result.ShipOutcomes[i].AmmoRemaining
+                };
+            result = new BattleResult
             {
                 BattleId = _result.BattleId, Victory = _result.Victory,
-                DestroyedEnemyIds = _result.DestroyedEnemyIds, LostAllyIds = _result.LostAllyIds,
-                ShipOutcomes = _result.ShipOutcomes, ElapsedSeconds = _result.ElapsedSeconds,
+                DestroyedEnemyIds = (EntityId[])_result.DestroyedEnemyIds.Clone(),
+                LostAllyIds = (EntityId[])_result.LostAllyIds.Clone(),
+                ShipOutcomes = outcomes,
+                ElapsedSeconds = _result.ElapsedSeconds,
                 ObjectivesComplete = _result.ObjectivesComplete
             };
-            return _result != null;
+            return true;
         }
     }
 }

@@ -1,6 +1,6 @@
 # 框架骨架说明
 
-这套骨架按 `development-plan.md` 的建议落地，目的是让 A–H 八个个工作包能同时开工。**当前只有契约和假实现，没有真实业务逻辑**——先把边界固定下来，再往里填东西。
+这套骨架按 `development-plan.md` 的建议落地，目的是让 A、B 两人各守一边边界并行开工：A 负责战斗仿真与表现，B 负责战略规则、剧情与整合。**当前只有契约和假实现，没有真实业务逻辑**——先把边界固定下来，再往里填东西。
 
 ## 已建成的东西
 
@@ -43,13 +43,17 @@ docs/
 
 **替换假实现的唯一位置是 `GameBootstrap.Create()`**。改那一个方法，其他代码不用动。
 
+两人怎么切：A 只改 `com.starpawn.combat`，B 改其余包与 `com.starpawn.application`。
+交界只有两处——`BattleStartSpec`（B 产出、A 消费）与 `CampaignFacade.SettleBattle`（A 的结果回传、B 执行）。
+`BattleRules.ValidateSpec` / `ValidatePower` 是共用的校验入口，不要在两边各写一套。
+
 ## 三条不能破的规则
 
 1. **业务模块之间不互相调用实现。** `Application` 引用各模块的 `Contracts`；`Domain` 只引用自己的 `Contracts` 和 `Foundation`。asmdef 已经在编译期卡死跨模块引用。
 2. **战斗只接收准备好的输入。** `BattleStartSpec` 里没有军衔、剧情、经济对象。战斗结束时只返回 `BattleResult` 事实，奖励多少由 `SettleBattle` 工作流决定。改成长曲线不需要动战斗代码。
 3. **剧情只提效果请求。** `StoryDecision` 返回 `StoryEffect[]`，由应用层分派给对应模块校验执行。剧情拿不到关系图的内部对象。
 
-`SettleBattle` 已经落实三条结算约束：用 `BattleId` 防重复发奖；先在候选阶段验证；全部提交成功后才让剧情读新事实。
+`SettleBattle` 落实四条结算约束：用 `BattleId` 防重复发奖；奖励任务 ID 取自 battle spec，不受门面当时状态影响；舰队损伤、资源、军功、关系、星系管辖、残骸缴获与剧情推进全在同一事务里；任一步失败全量回滚且可重试。
 
 ## 第一次联调
 
@@ -132,7 +136,7 @@ HP       = baseHP  × (L / L_ref)³ × roleFactor
 
 ## 编译与验证说明
 
-已安装 .NET 8 SDK，`tools/BuildCheck/` 下按 21 个 asmdef 生成了对应的 csproj，**全部 21 个程序集实际编译通过**。`tools/SmokeTests/` 是关键契约测试（11 项：重复结算、中途失败回滚、剧情重复选择、跨节点选项、战损继承、快照深拷贝、随机源上界、内容校验、内容驱动奖励、航行事务）。
+已安装 .NET 8 SDK，`tools/BuildCheck/` 下按 21 个 asmdef 生成了对应的 csproj，**全部 21 个程序集实际编译通过**。`tools/SmokeTests/` 是关键契约测试（15 项：重复结算、中途失败回滚、剧情重复选择、跨节点选项、战损继承、快照深拷贝、随机源上界、内容校验、内容驱动奖励、航行事务、战斗契约校验、剧情失败回滚、星系管辖与缴获、战斗结果深拷贝）。
 
 本机应用控制策略阻止新生成 DLL 的加载，测试**编译通过但未能执行**。换一台允许执行的机器：
 
@@ -141,6 +145,18 @@ cd tools/SmokeTests && dotnet run
 ```
 
 Unity 侧：用 Unity 2021.3 打开 `game/` 目录。`StarPawn.Presentation` 目前无源文件，等表现层填充。
+
+## 两人并行前的底座加固（2026-11-23）
+
+先确认编译：21 个 BuildCheck 工程与 SmokeTests 工程全部实际编译通过。随后补了三处：
+
+**1. 战斗契约自包含与共享校验。** `BattleStartSpec` 增加 `MissionId`、`OriginSystemId`、`TargetSystemId`，结算不再依赖门面当时的可变字段；`FleetEntry.SquadIndex` 限定 0..3。新增 `BattleRules.ValidateSpec` / `ValidatePower`，Application 与 Combat 共用同一份规则——四分队上限、负能量投入、重复舰 ID、非法战损都在进入战斗前拦下。`TryGetResult` 改为深拷贝，调用方改数组不会污染内部结果。
+
+**2. 结算事务补全。** `Atomic` 去掉没用的操作 ID，把门面自己的结算标记、记账与当前 ID 也纳入检查点，并加重入保护（嵌套调用由最外层统一回滚）。剧情 `Evaluate` 改为返回 `CommandResult`，移进事务内——剧情推进失败会连带回滚资源、军功、关系与星系管辖，重试可以成功。
+
+**3. 胜利后果落地。** 架构里承诺的领域扩张与战略缴获现在真的执行：胜利时在同一事务内调用 `Navigation.ClaimSystem`，并按击沉数发放合金。Navigation 的快照与检查点也改成深拷贝，外部改快照不影响内部状态。
+
+本机应用控制策略仍阻止新生成 DLL 加载，测试编译通过但未能执行（0x800711C7）；换机运行 `cd tools/SmokeTests && dotnet run`。
 
 ## 审查修复记录（2026-11-22）
 
@@ -160,7 +176,8 @@ Unity 侧：用 Unity 2021.3 打开 `game/` 目录。`StarPawn.Presentation` 目
 
 ### 仍需注意
 
-- **事务用回滚而非真正的候选状态隔离**：单机同步执行且无并发观察者，回滚等价于原子性。将来若引入异步或多线程，必须换成真正的候选状态提交。
+- **事务用回滚而非真正的候选状态隔离**：单机同步执行且无并发观察者，回滚等价于原子性；嵌套调用由最外层统一打检查点。将来若引入异步或多线程，必须换成真正的候选状态提交。
+- **战斗契约有唯一校验入口**：`BattleRules.ValidateSpec` / `ValidatePower` 由 Application 与 Combat 共用。扩展分队数量或能量规则时只改这里，不要在两人各自的代码里另写判断。
 - **空间维度**：仿真是二维平面。若要做完整三维机动，需改 `SpawnPoint`/Snapshot 坐标和命令契约。
 - **内容校验器是最小实现**：覆盖当前 6 类配置，新增配置类型时需扩展 `SubDirs` 和引用检查。
 - **任务日志运行时**：`content/quests/` 配置已就位，但运行时服务（读配置、算状态、出导航）尚未实现，见 `docs/storyline.md`。

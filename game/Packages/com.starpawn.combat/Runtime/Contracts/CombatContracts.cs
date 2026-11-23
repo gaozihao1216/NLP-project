@@ -5,14 +5,24 @@
 // 星图绝对坐标（光分）只在进入战斗时由应用层换算成这里的公里坐标。
 
 using System;
+using System.Collections.Generic;
 using StarPawn.Foundation;
 
 namespace StarPawn.Combat.Contracts
 {
-    /// <summary>战斗开始输入。只含解析后的数据，不含对战略模块的反向引用。</summary>
+    /// <summary>
+    /// 战斗开始输入。只含解析后的数据，不含对战略模块的反向引用。
+    /// 必须自包含：任务 ID 与星系锚点都在 spec 里，结算不依赖门面当时的当前任务。
+    /// </summary>
     public sealed class BattleStartSpec
     {
         public EntityId BattleId;
+        /// <summary>产生这场战斗的任务，奖励从它读，不由门面的可变字段决定。</summary>
+        public string MissionId;
+        /// <summary>出发星系。战斗只做局部仿真，不修改星图。</summary>
+        public EntityId OriginSystemId;
+        /// <summary>交战星系。胜利后由结算工作流主张管辖，Combat 自己不改星图。</summary>
+        public EntityId TargetSystemId;
         public FleetEntry[] Allies;
         public FleetEntry[] Enemies;
         public string BattlefieldLayout;
@@ -58,6 +68,8 @@ namespace StarPawn.Combat.Contracts
         public EntityId ShipId;
         public ContentId DefinitionId;
         public SquadRole Role;
+        /// <summary>玩家分队槽位 0..3；敌舰也填，用于统一的编成校验。</summary>
+        public int SquadIndex;
         public SpawnPoint Spawn;
         public ResolvedShipStats Stats;
         /// <summary>继承的战损：0=上一场被摧毁，1=完好。Combat 不得无条件重置为满。</summary>
@@ -165,6 +177,60 @@ namespace StarPawn.Combat.Contracts
         public float RadiusKm;
         public float Health01;
         public bool IsAlive;
+    }
+
+    /// <summary>
+    /// 战斗契约的共享校验。Combat.Domain 与 Application 都调用这里，
+    /// 避免并行开发时两个人各写一套边界检查，行为慢慢分叉。
+    /// </summary>
+    public static class BattleRules
+    {
+        /// <summary>玩家最多指挥四个分队，对应原型的四个槽位。</summary>
+        public const int MaxSquads = 4;
+
+        public static CommandResult ValidateSpec(BattleStartSpec spec)
+        {
+            if (spec == null) return CommandResult.Fail("NULL_SPEC", "战斗输入为空");
+            if (spec.BattleId.IsEmpty) return CommandResult.Fail("BAD_BATTLE_ID", "缺少战斗 ID");
+            if (spec.FixedStep <= 0f) return CommandResult.Fail("BAD_FIXED_STEP", "仿真步长必须为正");
+            if (spec.Allies == null || spec.Enemies == null)
+                return CommandResult.Fail("MISSING_FLEET", "敌我编成不能为空");
+
+            var seen = new HashSet<EntityId>();
+            var squads = new HashSet<int>();
+            foreach (var e in Enumerate(spec.Allies, spec.Enemies))
+            {
+                if (!e.IsLaunchable) continue;
+                if (e.ShipId.IsEmpty || !seen.Add(e.ShipId))
+                    return CommandResult.Fail("BAD_SHIP_ID", "舰船 ID 为空或重复: " + e.ShipId);
+                if (e.SquadIndex < 0 || e.SquadIndex >= MaxSquads)
+                    return CommandResult.Fail("SQUAD_OUT_OF_RANGE", "分队序号必须在 0..3: " + e.SquadIndex);
+                squads.Add(e.SquadIndex);
+                if (e.InheritedHull01 <= 0f || e.InheritedHull01 > 1f)
+                    return CommandResult.Fail("BAD_HULL", "继承战损必须在 (0,1]: " + e.InheritedHull01);
+            }
+            if (squads.Count > MaxSquads)
+                return CommandResult.Fail("TOO_MANY_SQUADS", "分队数超过 " + MaxSquads);
+            return CommandResult.Ok();
+        }
+
+        private static IEnumerable<FleetEntry> Enumerate(FleetEntry[] a, FleetEntry[] b)
+        {
+            foreach (var e in a) yield return e;
+            foreach (var e in b) yield return e;
+        }
+
+        /// <summary>三路能量必须非负且和为 1。归一化不能掩盖负投入。</summary>
+        public static CommandResult ValidatePower(PowerAllocationCommand cmd)
+        {
+            if (cmd == null) return CommandResult.Fail("NULL_COMMAND", "能量命令为空");
+            if (cmd.Propulsion < 0f || cmd.Shield < 0f || cmd.Weapons < 0f)
+                return CommandResult.Fail("INVALID_POWER", "三路能量比例不能为负");
+            float sum = cmd.Propulsion + cmd.Shield + cmd.Weapons;
+            if (sum < 0.999f || sum > 1.001f)
+                return CommandResult.Fail("INVALID_POWER", "三路能量比例之和必须为 1，当前 " + sum);
+            return CommandResult.Ok();
+        }
     }
 
     public enum BattlePhase { Running, Victory, Defeat }

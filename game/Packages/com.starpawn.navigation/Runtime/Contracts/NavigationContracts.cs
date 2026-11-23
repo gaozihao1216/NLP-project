@@ -25,5 +25,7 @@ namespace StarPawn.Navigation.Contracts
         NavigationSnapshot Read();
         CommandResult TravelTo(EntityId destination);
         CommandResult AbortTravel();
+        /// <summary>战后主张管辖权：已存在则标记已访问，不存在则加入已知星图。</summary>
+        CommandResult ClaimSystem(EntityId systemId);
     }
 }

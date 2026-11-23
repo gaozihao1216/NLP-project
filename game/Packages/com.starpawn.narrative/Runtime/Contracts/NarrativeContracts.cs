@@ -73,7 +73,11 @@ namespace StarPawn.Narrative.Contracts
     /// </summary>
     public interface INarrativeRuntime
     {
-        NarrativeUpdate Evaluate(NarrativeFacts facts);
+        /// <summary>
+        /// 按事实推进剧情。必须返回 CommandResult：结算工作流把它纳入同一事务，
+        /// 剧情推进失败时资源、军功、关系的写入要能一起回滚。
+        /// </summary>
+        CommandResult Evaluate(NarrativeFacts facts, out NarrativeUpdate update);
         StoryView ReadCurrentView();
         StoryDecision Choose(StoryChoiceId choiceId, NarrativeFacts facts);
         CommandResult CommitChoice(StoryChoiceId choiceId);

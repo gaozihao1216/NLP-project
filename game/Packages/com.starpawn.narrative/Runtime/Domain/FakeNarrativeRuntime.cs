@@ -20,12 +20,22 @@ namespace StarPawn.Narrative.Domain
             ["ch1.after_battle"] = new[] { "report_merit", "court_faction" }
         };
 
-        public NarrativeUpdate Evaluate(NarrativeFacts facts)
+        /// <summary>测试注入点：模拟剧情推进失败，验证结算事务能整体回滚。</summary>
+        public static bool ForceFailNextEvaluate;
+
+        public CommandResult Evaluate(NarrativeFacts facts, out NarrativeUpdate update)
         {
+            if (ForceFailNextEvaluate)
+            {
+                ForceFailNextEvaluate = false;
+                update = null;
+                return CommandResult.Fail("EVALUATE_FORCED", "剧情推进被强制失败");
+            }
             if (_nodeId == "ch1.intro" && facts.SubmittedBattles != null && facts.SubmittedBattles.Length > 0)
                 _nodeId = "ch1.after_battle";
-            return new NarrativeUpdate
+            update = new NarrativeUpdate
             { HasNewNode = true, View = ReadCurrentView(), RequestedEffects = new StoryEffect[0] };
+            return CommandResult.Ok();
         }
 
         public StoryView ReadCurrentView()

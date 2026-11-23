@@ -67,10 +67,15 @@ namespace StarPawn.Narrative.Contracts
         public StoryEffect[] RequestedEffects;
     }
 
+    /// <summary>
+    /// 剧情选择生命周期。Choose 只生成决策不改节点；
+    /// CommitChoice 由应用层在效果全部执行成功后调用，才真正推进节点并记录已用选项。
+    /// </summary>
     public interface INarrativeRuntime
     {
         NarrativeUpdate Evaluate(NarrativeFacts facts);
         StoryView ReadCurrentView();
         StoryDecision Choose(StoryChoiceId choiceId, NarrativeFacts facts);
+        CommandResult CommitChoice(StoryChoiceId choiceId);
     }
 }

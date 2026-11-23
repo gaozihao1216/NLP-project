@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Economy.Domain</AssemblyName>
+    <RootNamespace>StarPawn.Economy.Domain</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.economy/Runtime/Domain/FakeEconomyService.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Economy_Contracts.csproj" />
+    <ProjectReference Include="Foundation.csproj" />
+  </ItemGroup>
+</Project>

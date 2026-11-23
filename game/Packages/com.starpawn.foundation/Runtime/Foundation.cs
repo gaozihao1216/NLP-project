@@ -75,6 +75,38 @@ namespace StarPawn.Foundation
         public static Result<T> Fail(string code, string msg) => new Result<T>(false, default, new Error(code, msg));
     }
 
+    /// <summary>
+    /// 状态检查点。跨模块原子提交用：工作流开始前 Capture，任一步失败 Restore。
+    /// 单机同步执行，无并发观察者，回滚等价于原子性。
+    /// </summary>
+    public interface IStateCheckpoint
+    {
+        object CaptureState();
+        void RestoreState(object state);
+    }
+
+    /// <summary>任务奖励定义。内容驱动：由 Infrastructure 从 missions/*.json 读出，注入应用层。</summary>
+    public sealed class MissionReward
+    {
+        public int Merit;
+        public int Credits;
+    }
+
+    /// <summary>任务奖励来源。应用层只认接口，不关心 JSON 还是数据库。</summary>
+    public interface IMissionRewardSource
+    {
+        MissionReward Get(string missionId);
+    }
+
+    /// <summary>单位约定。星图存光分整数，战斗用公里浮点，只在进战斗时换算一次。</summary>
+    public static class DistanceUnits
+    {
+        public const double KilometersPerLightMinute = 17987547.48;
+        public const long LightMinutesPerLightYear = 525960;
+        public static double ToKilometers(long lightMinutes) => lightMinutes * KilometersPerLightMinute;
+        public static long ToLightMinutes(double kilometers) => (long)Math.Round(kilometers / KilometersPerLightMinute);
+    }
+
     /// <summary>确定性随机源。战斗可复现的前提，禁止直接用 UnityEngine.Random。</summary>
     public interface IRandomSource
     {
@@ -82,19 +114,36 @@ namespace StarPawn.Foundation
         int NextInt(int minInclusive, int maxExclusive);
     }
 
-    /// <summary>线性同余随机源，同一 seed 必然同一序列。放在 Foundation 供各模块使用。</summary>
+    /// <summary>
+    /// 线性同余随机源。两个修正：零种子映射为 1（否则退化）；
+    /// NextInt 用整数取模而非 float 乘法，避免浮点舍入把上界包含进来。
+    /// </summary>
     public sealed class DeterministicRandom : IRandomSource
     {
         private long _state;
-        public DeterministicRandom(int seed) { _state = seed & 0x7FFFFFFF; }
+        public DeterministicRandom(int seed)
+        {
+            long s = seed & 0x7FFFFFFF;
+            _state = s == 0 ? 1 : s;
+        }
         private long Next()
         {
             _state = (_state * 48271L) % 2147483647L;
             return _state;
         }
-        public float NextFloat() => (Next() - 1) / 2147483646f;
+        public float NextFloat()
+        {
+            // state 范围 1..2147483646，减 1 后为 0..2147483645。
+            // 用 double 中转，避免 float 舍入成 1.0f。
+            return (float)((double)(Next() - 1) / 2147483646.0);
+        }
         public int NextInt(int minInclusive, int maxExclusive)
-            => minInclusive + (int)(NextFloat() * (maxExclusive - minInclusive));
+        {
+            if (maxExclusive <= minInclusive)
+                throw new ArgumentException("maxExclusive 必须大于 minInclusive", nameof(maxExclusive));
+            long range = (long)maxExclusive - minInclusive;
+            return minInclusive + (int)(Next() % range);
+        }
     }
 
     /// <summary>仿真时钟。固定步长由应用层统一定义，战斗模块不自己决定推进节奏。</summary>

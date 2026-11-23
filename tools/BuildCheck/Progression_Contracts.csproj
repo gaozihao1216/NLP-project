@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Progression.Contracts</AssemblyName>
+    <RootNamespace>StarPawn.Progression.Contracts</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.progression/Runtime/Contracts/ProgressionContracts.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Foundation.csproj" />
+  </ItemGroup>
+</Project>

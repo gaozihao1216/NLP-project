@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>StarPawn.SmokeTests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../BuildCheck/Application.csproj" />
+    <ProjectReference Include="../BuildCheck/Bootstrap.csproj" />
+    <ProjectReference Include="../BuildCheck/Combat_Contracts.csproj" />
+    <ProjectReference Include="../BuildCheck/Combat_Domain.csproj" />
+    <ProjectReference Include="../BuildCheck/Economy_Contracts.csproj" />
+    <ProjectReference Include="../BuildCheck/Economy_Domain.csproj" />
+    <ProjectReference Include="../BuildCheck/Fleet_Contracts.csproj" />
+    <ProjectReference Include="../BuildCheck/Fleet_Domain.csproj" />
+    <ProjectReference Include="../BuildCheck/Foundation.csproj" />
+    <ProjectReference Include="../BuildCheck/Infrastructure.csproj" />
+    <ProjectReference Include="../BuildCheck/Narrative_Contracts.csproj" />
+    <ProjectReference Include="../BuildCheck/Narrative_Domain.csproj" />
+    <ProjectReference Include="../BuildCheck/Navigation_Contracts.csproj" />
+    <ProjectReference Include="../BuildCheck/Navigation_Domain.csproj" />
+    <ProjectReference Include="../BuildCheck/Officer_Contracts.csproj" />
+    <ProjectReference Include="../BuildCheck/Officer_Domain.csproj" />
+    <ProjectReference Include="../BuildCheck/Presentation.csproj" />
+    <ProjectReference Include="../BuildCheck/Progression_Contracts.csproj" />
+    <ProjectReference Include="../BuildCheck/Progression_Domain.csproj" />
+    <ProjectReference Include="../BuildCheck/Relations_Contracts.csproj" />
+    <ProjectReference Include="../BuildCheck/Relations_Domain.csproj" />
+  </ItemGroup>
+</Project>

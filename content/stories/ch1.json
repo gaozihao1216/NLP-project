@@ -5,16 +5,71 @@
       "speaker": "机器人教官",
       "text": "你为什么想当兵？",
       "choices": [
-        { "id": "obey", "text": "服从训练，争取军功", "next": "ch1.after_battle" },
-        { "id": "resist", "text": "拒绝服从", "condition": "loyaltyBelowThreshold", "next": "ch1.conflict" }
+        {
+          "id": "obey",
+          "text": "服从训练，争取军功",
+          "next": "ch1.after_battle"
+        },
+        {
+          "id": "resist",
+          "text": "拒绝服从",
+          "condition": "loyaltyBelowThreshold",
+          "next": "ch1.conflict"
+        }
       ]
     },
     "ch1.after_battle": {
       "speaker": "奥姆斯特元帅",
       "text": "这一仗打得不错。想好站哪边了吗？",
       "choices": [
-        { "id": "report_merit", "text": "上报战功", "effects": [{ "kind": "GrantMerit", "amount": 20 }] },
-        { "id": "court_faction", "text": "接近派系", "effects": [{ "kind": "AdjustRelation", "targetId": "npc.chenyu", "amount": 10 }] }
+        {
+          "id": "report_merit",
+          "text": "上报战功",
+          "effects": [
+            {
+              "kind": "GrantMerit",
+              "amount": 20
+            }
+          ]
+        },
+        {
+          "id": "court_faction",
+          "text": "接近派系",
+          "effects": [
+            {
+              "kind": "AdjustRelation",
+              "targetId": "npc.chenyu",
+              "amount": 10
+            }
+          ]
+        }
+      ]
+    },
+    "ch1.conflict": {
+      "speaker": "军官",
+      "text": "你拒绝了训练命令。周围的新兵停下手里的活，盯着你看。",
+      "choices": [
+        {
+          "id": "back_down",
+          "text": "退让，接受安排",
+          "effects": [
+            {
+              "kind": "AdjustRelation",
+              "targetId": "npc.aomusi",
+              "amount": -5
+            }
+          ]
+        },
+        {
+          "id": "hold_firm",
+          "text": "坚持己见",
+          "effects": [
+            {
+              "kind": "GrantMerit",
+              "amount": 5
+            }
+          ]
+        }
       ]
     }
   }

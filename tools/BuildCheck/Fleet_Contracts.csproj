@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Fleet.Contracts</AssemblyName>
+    <RootNamespace>StarPawn.Fleet.Contracts</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.fleet/Runtime/Contracts/FleetContracts.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Foundation.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Application</AssemblyName>
+    <RootNamespace>StarPawn.Application</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.application/Runtime/CampaignFacade.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Foundation.csproj" />
+    <ProjectReference Include="Navigation_Contracts.csproj" />
+    <ProjectReference Include="Fleet_Contracts.csproj" />
+    <ProjectReference Include="Economy_Contracts.csproj" />
+    <ProjectReference Include="Progression_Contracts.csproj" />
+    <ProjectReference Include="Relations_Contracts.csproj" />
+    <ProjectReference Include="Narrative_Contracts.csproj" />
+    <ProjectReference Include="Combat_Contracts.csproj" />
+    <ProjectReference Include="Officer_Contracts.csproj" />
+  </ItemGroup>
+</Project>

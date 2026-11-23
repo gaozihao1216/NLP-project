@@ -130,22 +130,38 @@ HP       = baseHP  × (L / L_ref)³ × roleFactor
 
 叙事侧的落实放在 `docs/storyline.md` 和 `content/quests/`：任务日志按主线/支线/委托分组，支持单条追踪和星图导航引导。银鹰与家族的任务条目目前只是配置示例，用于验证共享架构，不含完整剧情。
 
-## 决策已定但代码未跟进（待办）
+## 编译与验证说明
 
-上面四条是设计决策，下面这些还没有写进 C# 契约与假实现。接手时按此清单补，别当成已实现：
+已安装 .NET 8 SDK，`tools/BuildCheck/` 下按 21 个 asmdef 生成了对应的 csproj，**全部 21 个程序集实际编译通过**。`tools/SmokeTests/` 是关键契约测试（11 项：重复结算、中途失败回滚、剧情重复选择、跨节点选项、战损继承、快照深拷贝、随机源上界、内容校验、内容驱动奖励、航行事务）。
 
-| 决策 | 待补内容 | 涉及文件 |
-|---|---|---|
-| 战斗期间战略暂停 | 已符合，无需改 | — |
-| 结算含扩张与掠夺 | `SettleBattle` 增加 `Navigation` 领地更新；`BattleResult` 加目标达成标记 | `CampaignFacade.cs`、`CombatContracts.cs` |
-| 坐标分层 | `Foundation` 加光分/公里换算常量；星图坐标类型定 `long` | `Foundation.cs`、`NavigationContracts.cs` |
-| 陨石种子生成 | `BattleStartSpec` 已有 `RandomSeed`，补 `BattlefieldLayout` 取值约定 | `CombatContracts.cs` |
-| 陨石静止掩体 | `BattleSnapshot` 加只读 `ObstacleSnapshot[]`（含 `Health01`）；炮弹命中判定 | `CombatContracts.cs`、`FakeCombatRuntime.cs` |
-| 能量三路分配 | 加 `PowerAllocationCommand`；`ShipSnapshot` 加护罩值与分配比例；三档预设常量 | `CombatContracts.cs`、`FakeCombatRuntime.cs` |
-| 立方律参数 | `content/ships/` 各舰补特征长度、roleFactor、机动/精度参数 | `content/ships/*.json` |
-| 银鹰配置 | 补 `content/factions/empire.json` | `content/factions/` |
-| 任务日志 | 运行时任务日志服务（读 `content/quests/`、算状态、出导航） | 待定新包 |
+本机应用控制策略阻止新生成 DLL 的加载，测试**编译通过但未能执行**。换一台允许执行的机器：
 
-## 编译说明
+```bash
+cd tools/SmokeTests && dotnet run
+```
 
-本机没有装 Unity 和 .NET SDK，这批 C# 只做了静态检查（括号配对、命名空间、接口与实现一致性），**没有实际编译**。拿到 Unity 2021.3 后打开 `game/` 目录即可编译；如有编译错误，优先检查 `using` 与 asmdef 引用是否匹配。
+Unity 侧：用 Unity 2021.3 打开 `game/` 目录。`StarPawn.Presentation` 目前无源文件，等表现层填充。
+
+## 审查修复记录（2026-11-22）
+
+按代码审查意见完成六项修复，骨架从"静态检查通过"变成"可编译、可验证、失败后状态正确"：
+
+**1. 编译阻断** — `HashSet<EntityId>` 替代 `battleId.Value`；两个 `SquadRole` 枚举保留在各自模块，应用层显式映射（`GameBootstrap` 的 asmdef 也补上了缺失的 Contracts 引用）。
+
+**2. 战斗契约** — `FleetEntry` 带已解析属性与继承战损；`BattleResult` 返回逐舰战后事实；新增 `ObstacleSnapshot`（静止有血量掩体）和 `PowerAllocationCommand`（三档预设）；`IBattleSession` 让表现层通过门面推进战斗；契约顶部写明"二维平面仿真 + 3D 表现"的空间约定。
+
+**3. 正确性** — `Foundation` 加 `IStateCheckpoint`，`Atomic()` 在动作前给六个服务打检查点，任一步失败全量回滚（含门面自己的已结算标记）。剧情改为 `Choose` 只校验、`CommitChoice` 才推进，杜绝重复发奖和跨节点选择。所有假实现的 `Read()` 改为深拷贝或重建，外部改快照不影响内部状态。
+
+**4. 内容通路** — `BasicContentValidator` 真正读 JSON，校验 ID 唯一、剧情/任务/星图/舰船引用；补齐 `ship.d_destroyer`、`faction.empire`、`ch1.conflict` 三处悬空引用；奖励改由 `JsonMissionRewardSource` 从 `content/missions/` 读取，改 JSON 会改变结算数值。
+
+**5. 确定性清理** — 关系键统一为 `from|to|kind`；经济拒绝负数与溢出；`PerformPoliticalAction` 真正执行；`SettleBattle` 纳入 `EvaluatePromotion`；`DeterministicRandom` 修零种子退化与浮点上界问题。
+
+**6. 战损闭环** — `ShipReadiness`（Ready/Damaged/InRepair/Destroyed）决定出战资格；战斗继承长期损伤，逐舰回写；击沉舰退出舰队，下一场不会满血复活。
+
+### 仍需注意
+
+- **事务用回滚而非真正的候选状态隔离**：单机同步执行且无并发观察者，回滚等价于原子性。将来若引入异步或多线程，必须换成真正的候选状态提交。
+- **空间维度**：仿真是二维平面。若要做完整三维机动，需改 `SpawnPoint`/Snapshot 坐标和命令契约。
+- **内容校验器是最小实现**：覆盖当前 6 类配置，新增配置类型时需扩展 `SubDirs` 和引用检查。
+- **任务日志运行时**：`content/quests/` 配置已就位，但运行时服务（读配置、算状态、出导航）尚未实现，见 `docs/storyline.md`。
+

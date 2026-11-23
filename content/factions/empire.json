@@ -1,0 +1,10 @@
+{
+  "id": "faction.empire",
+  "name": "银鹰帝国",
+  "growthMode": "Merit",
+  "resourceVisibility": "CombatOnly",
+  "highCommandCoversSupply": true,
+  "relationPreset": "LoyalButFactional",
+  "storyRoute": "imperial_trial",
+  "note": "最简配置：验证同一套系统承载阵营差异，完整剧情后做"
+}

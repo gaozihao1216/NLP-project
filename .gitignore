@@ -7,3 +7,7 @@
 
 # WorkBuddy 工作记录
 .workbuddy/
+
+# .NET 编译产物
+bin/
+obj/

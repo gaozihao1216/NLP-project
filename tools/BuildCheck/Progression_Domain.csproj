@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Progression.Domain</AssemblyName>
+    <RootNamespace>StarPawn.Progression.Domain</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.progression/Runtime/Domain/FakeProgressionService.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Progression_Contracts.csproj" />
+    <ProjectReference Include="Foundation.csproj" />
+  </ItemGroup>
+</Project>

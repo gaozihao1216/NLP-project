@@ -4,6 +4,9 @@ using StarPawn.Foundation;
 
 namespace StarPawn.Fleet.Contracts
 {
+    /// <summary>战备状态。决定能否出战，与战场内 IsAlive 是两套概念。</summary>
+    public enum ShipReadiness { Ready, Damaged, InRepair, Destroyed }
+
     /// <summary>玩家拥有的舰船长期状态。与 ShipDefinition、CombatShipState、ShipView 分离。</summary>
     public sealed class OwnedShipState
     {
@@ -13,6 +16,7 @@ namespace StarPawn.Fleet.Contracts
         public float HullIntegrity01;
         public bool IsInFleet;
         public SquadRole AssignedRole;
+        public ShipReadiness Readiness;
     }
 
     public enum SquadRole { Flagship, Escort, Scout, Carrier }
@@ -23,12 +27,27 @@ namespace StarPawn.Fleet.Contracts
         public EntityId[] Formation;
     }
 
+    /// <summary>战后回写用的中性事实结构。Fleet 不引用 Combat 契约，由应用层映射。</summary>
+    public sealed class ShipDamageReport
+    {
+        public EntityId ShipId;
+        public bool IsLost;
+        public float HullAfter01;
+    }
+
     public interface IFleetService
     {
         FleetSnapshot Read();
         CommandResult SetRole(EntityId shipId, SquadRole role);
         CommandResult SetFormation(EntityId[] shipIds);
-        // 战斗结束后由应用层调用，输入战损事实； Fleet 自己算长期损伤，不反向调用战斗。
-        CommandResult ApplyBattleDamage(EntityId[] lostShipIds, float[] hullAfter);
+        /// <summary>
+        /// 战后回写：击沉舰标记为 Destroyed 且退出舰队；幸存舰按 HullAfter01 更新，
+        /// 低于阈值转 Damaged，仍可出战但继承损伤；维修完成由单独命令处理。
+        /// </summary>
+        CommandResult ApplyBattleDamage(ShipDamageReport[] reports);
+        /// <summary>维修。把舰船恢复到 Ready，HullIntegrity01 回到 1。</summary>
+        CommandResult Repair(EntityId shipId);
+        /// <summary>查询某舰能否出战：在舰队中、非 Destroyed、HullIntegrity01 &gt; 0。</summary>
+        bool IsLaunchable(EntityId shipId);
     }
 }

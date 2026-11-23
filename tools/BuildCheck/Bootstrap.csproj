@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Bootstrap</AssemblyName>
+    <RootNamespace>StarPawn.Bootstrap</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Assets/Game/Bootstrap/GameBootstrap.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Application.csproj" />
+    <ProjectReference Include="Combat_Contracts.csproj" />
+    <ProjectReference Include="Combat_Domain.csproj" />
+    <ProjectReference Include="Economy_Contracts.csproj" />
+    <ProjectReference Include="Economy_Domain.csproj" />
+    <ProjectReference Include="Fleet_Contracts.csproj" />
+    <ProjectReference Include="Fleet_Domain.csproj" />
+    <ProjectReference Include="Foundation.csproj" />
+    <ProjectReference Include="Infrastructure.csproj" />
+    <ProjectReference Include="Narrative_Contracts.csproj" />
+    <ProjectReference Include="Narrative_Domain.csproj" />
+    <ProjectReference Include="Navigation_Contracts.csproj" />
+    <ProjectReference Include="Navigation_Domain.csproj" />
+    <ProjectReference Include="Officer_Contracts.csproj" />
+    <ProjectReference Include="Officer_Domain.csproj" />
+    <ProjectReference Include="Presentation.csproj" />
+    <ProjectReference Include="Progression_Contracts.csproj" />
+    <ProjectReference Include="Progression_Domain.csproj" />
+    <ProjectReference Include="Relations_Contracts.csproj" />
+    <ProjectReference Include="Relations_Domain.csproj" />
+  </ItemGroup>
+</Project>

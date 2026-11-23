@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Relations.Domain</AssemblyName>
+    <RootNamespace>StarPawn.Relations.Domain</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.relations/Runtime/Domain/FakeRelationsService.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Relations_Contracts.csproj" />
+    <ProjectReference Include="Foundation.csproj" />
+  </ItemGroup>
+</Project>

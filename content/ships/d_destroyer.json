@@ -1,0 +1,16 @@
+{
+  "id": "ship.d_destroyer",
+  "name": "D级驱逐舰",
+  "source": "小说第34章舰船数值表",
+  "base": { "crew": 200, "mainGun": 40, "subGun": 20, "defense": 40 },
+  "combat": {
+    "maxSpeed": 28,
+    "turnRate": 32,
+    "gunRange": 240,
+    "shellVelocity": 260,
+    "reloadSeconds": 4.5,
+    "armor": { "coreMultiplier": 1.0, "outerMultiplier": 0.4, "ricochetAngleDeg": 28 },
+    "hp": 300
+  },
+  "note": "航行与装甲参数小说未给出，原型阶段按手感调平衡"
+}

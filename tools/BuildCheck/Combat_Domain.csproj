@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Combat.Domain</AssemblyName>
+    <RootNamespace>StarPawn.Combat.Domain</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/FakeCombatRuntime.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Combat_Contracts.csproj" />
+    <ProjectReference Include="Foundation.csproj" />
+  </ItemGroup>
+</Project>

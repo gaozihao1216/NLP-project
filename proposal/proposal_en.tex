@@ -1,0 +1,162 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\hypersetup{colorlinks=false,pdfborder={0 0 0}}
+
+% Compact section headings
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{}{0em}{}
+\titlespacing*{\section}{0pt}{0.7ex}{0.3ex}
+\titlespacing*{\subsection}{0pt}{0.6ex}{0.2ex}
+\setlength{\parskip}{0.2ex}
+\setlength{\parindent}{2em}
+\setlength{\emergencystretch}{2em}
+\setlength{\intextsep}{6pt plus 2pt minus 2pt}
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+
+\title{Design of a Space War Game Demo\\ Based on the Novel \textit{Xiaobing Chuanqi}}
+\author{Group members: Gao Zihao (Student ID: 2026011117)\\[2pt]
+        \phantom{Group members: }Zhang Rongbo (Student ID: 2026011111)}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace*{-2.6ex}
+
+\begin{abstract}
+\noindent This project takes the web novel \textit{Xiaobing Chuanqi} as its world-building
+blueprint and will be developed with the Unity engine and Blender assets, producing a playable
+game demo themed on interstellar warfare and driven by a faction's rise from the bottom.
+The central design idea is to let the three playable factions---the Federation, the Silver Eagle
+Empire and the Family---share one underlying layer of business logic (the relation network, the
+combat system and the star map), differing only in starting conditions and growth resources,
+so that content reuse is maximised within a limited schedule. This document states the motivation,
+the comparison with existing works, the system design and the implementation plan, and reports the
+completed setting analysis, system design, clickable prototype and compilable C\# engineering skeleton.
+\end{abstract}
+
+\section{Topic and Goals}
+
+We choose the interstellar-war setting for two reasons: it borrows the positive feedback of
+production and scale expansion from \textit{Dyson Sphere Program}, and it reuses the complete
+setting already provided by \textit{Xiaobing Chuanqi}, which lowers the cost of world building.
+The novel supplies four forms of government, a six-tier twenty-one-rank military hierarchy,
+an A--J ship rating table, a bipolar order of two great powers plus the fragmented Wuluan system,
+and a four-stage main storyline that runs from recruit to the unification of the universe.
+These settings convert directly into numeric baselines and a narrative skeleton.
+
+We plan to deliver an operable game demo supporting at least one fully playable faction flow.
+The player grows either through military merit (Federation, Silver Eagle) or through resource
+expansion (Family), and in the late game enters the same layer of resource and political contention.
+AI is applied inside the game: an AI adjutant modelled on Xingling, the personified central computer
+of the novel, provides tactical advice and intelligence analysis. The project does not aim at
+algorithmic novelty; it is evaluated on the completeness and playability of the demo itself.
+
+\section{Related Work and Comparison}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.17\textwidth}>{\raggedright\arraybackslash}p{0.30\textwidth}>{\raggedright\arraybackslash}p{0.45\textwidth}@{}}
+\toprule
+Work & Core mechanics & Difference from this project \\
+\midrule
+Dyson Sphere Program & Automated production chains, scale expansion &
+This project centres on faction rivalry and narrative branching; production is only a logistics layer \\
+Homeworld & Fleet tactics, three-dimensional space command &
+This project adds a relation network and a growth system; combat is only one layer \\
+Stellaris & 4X grand strategy, diplomacy and factions &
+This project focuses on single-run character growth rather than a global 4X simulation \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The three works cover production, tactics and strategy respectively, yet all lack the narrative
+driver of \emph{a character growing inside faction politics}. Our difference lies in using the
+novel's plot as the script, binding military merit, resources and relation values to story branches,
+and letting the three factions reuse the common modules to lower implementation cost.
+
+\section{System Design}
+The main storyline is currently designed as three branches: the Federation line, the Silver Eagle
+line and the Family line.
+
+\subsection{Differences and Balance Among the Three Factions}
+The Federation line follows Tang Long. In the early game high command handles resource scheduling
+while the player concentrates on combat, and must cope with merit being claimed by others and with
+factional infighting. The Silver Eagle line is similar at the start, but its subordinates are
+absolutely loyal and the conflict comes from the succession struggle among princes and the
+alignment of nobles. The Family line builds resources and industry from nothing: high freedom,
+simple relations.
+
+The three lines are comparable in the early game: the combat lines are spared logistics, and the
+Family line is spared politics. Growth paths are isomorphic, and once the player is promoted into
+high command all three converge on the same resource and political layer.
+
+\subsection{Story Progression and Resource Scheduling}
+The main line is organised around the four-stage conflict of the novel: the recruit period, the
+founding of the Wuluan state, the Anti-Tang alliance, and the unification of the universe.
+Two or three pivotal choices change the ending; they are triggered jointly by the relation network,
+military merit and resource stock. Resources share one underlying set (funds, rare metals, ships,
+population, energy) and differ only in when each becomes visible to the player.
+
+\section{Implementation Plan and Division of Labour}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.14\textwidth}>{\raggedright\arraybackslash}p{0.34\textwidth}>{\raggedright\arraybackslash}p{0.44\textwidth}@{}}
+\toprule
+Phase & Task & Deliverable \\
+\midrule
+Week 1 & Vertical slice: real combat and the Unity shell &
+Greybox battle with steering, firing, hits and settlement \\
+Week 2 & Minimal strategic loop &
+Data-driven ship stats, mission log, two-node star map, save file \\
+Weeks 3--6 & Common modules and content &
+Runnable versions of the relation network, economy and narrative \\
+Weeks 7--10 & Faction content and adjutant &
+One faction's complete flow, AI adjutant prototype \\
+Weeks 11--12 & Integration, testing and demo &
+Playable demo, demonstration video \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Division of labour}: Member A, Gao Zihao, owns the real combat simulation and
+touches only \path{com.starpawn.combat} and \path{content/ships}. Member B, Zhang Rongbo, owns the
+Unity playable shell, strategic rules, the relation network, mission narrative, the AI adjutant and
+final assembly, and touches the remaining packages and \path{Assets/Game}. The two meet only at
+\path{BattleStartSpec} and \path{SettleBattle}; \path{CombatContracts} is frozen for now.
+Both work in parallel on the same battle during week one and join at the battle-result interface
+on day five.
+
+\textbf{Resource estimate}: two people, about twelve weeks; the stack is Unity for runtime and
+Blender for assets (exported as glTF/FBX). The main needs are development machines and art assets;
+no extra computing power or data purchase is required.
+
+\textbf{Results so far}: we have completed a full reading of \textit{Xiaobing Chuanqi} and three
+setting-analysis documents, and produced a concept poster and the system architecture design, plus a
+clickable single-file prototype with five views---star map, relation network, combat, resources and
+narrative---whose combat page is a real-time 3D battle HUD. On the engineering side, twelve Unity
+packages and twenty-one assemblies form a skeleton that separates contracts from fake implementations,
+with cross-module references forbidden at compile time, and all twenty-one assemblies do compile.
+Fourteen scenario blocks of contract tests cover duplicate settlement, rollback on mid-way failure,
+inheritance of battle damage, snapshot isolation and content validation. Ships, factions, star map,
+missions, story and the mission log are all stored as JSON with reference validation, so rewards and
+hull attributes change by editing configuration. Code repository:
+\url{https://github.com/gaozihao1216/NLP-project}.
+
+\section{Statement on AI Usage}
+An AI assistant was used while writing this proposal: to read and structure the novel, to extract
+settings and compile them into analysis documents, and to help with wording and organisation.
+The topic, the system design decisions and the final content were determined and checked by the
+group members.
+
+\end{document}

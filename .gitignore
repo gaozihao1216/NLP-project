@@ -11,3 +11,37 @@
 # .NET 编译产物
 bin/
 obj/
+
+# Unity 工程：本地生成目录，绝不提交
+game/[Ll]ibrary/
+game/[Tt]emp/
+game/[Oo]bj/
+game/[Bb]uild/
+game/[Bb]uilds/
+game/[Ll]ogs/
+game/[Uu]ser[Ss]ettings/
+game/[Mm]emoryCaptures/
+game/[Rr]ecordings/
+game/.vs/
+game/.idea/
+game/.consulo/
+
+# Unity 自动生成的工程文件（由 Unity 重新生成，不手写）
+game/*.csproj
+game/*.sln
+game/*.user
+game/*.pidb
+game/*.booproj
+game/*.svd
+game/*.unityproj
+game/*.opendb
+game/*.VC.db
+
+# 构建输出与崩溃转储
+game/*.apk
+game/*.aab
+game/*.stackdump
+game/crashlytics-build.properties
+
+# 注意：Assets 下的 *.meta 必须提交，不要加入忽略。
+# 注意：tools/BuildCheck/ 下的 *.csproj 是手写验证工程，必须保留，上面的规则只作用于 game/。

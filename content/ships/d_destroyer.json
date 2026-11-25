@@ -17,6 +17,15 @@
       "rollAccelDps2": 230
     },
     "maxSpreadDeg": 1.0,
+    "power": {
+      "capacity": 140,
+      "regenPerSecond": 3.6,
+      "propulsionDrainPerSecond": 4.4,
+      "turnDrainPerSecond": 0.7,
+      "shieldDrainPerSecond": 1.1,
+      "weaponDrainPerShot": 4.5,
+      "restartFraction": 0.2
+    },
     "gunRange": 240,
     "shellVelocity": 260,
     "reloadSeconds": 4.5,

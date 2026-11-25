@@ -13,13 +13,13 @@ namespace StarPawn.Combat.Domain.Systems
 
         public static void Step(CombatWorld w, float dt)
         {
-            // 交战档把能量给武器：装填最快；航行档武器最慢。
-            float reloadScale = 1.4f - 0.8f * w.Power.Weapons;
-
             for (int i = 0; i < w.Ships.Count; i++)
             {
                 var s = w.Ships[i];
                 if (!s.IsAlive) continue;
+
+                // 交战档把能量给武器：装填最快；航行档武器最慢。分配是每舰自己的。
+                float reloadScale = 1.4f - 0.8f * Clamp01(s.Power.Weapons);
 
                 if (s.ReloadTimer > 0f) s.ReloadTimer -= dt;
 
@@ -29,6 +29,13 @@ namespace StarPawn.Combat.Domain.Systems
                 if (s.ReloadTimer > 0f)
                 {
                     w.Emit("NotReady", s.Id, default(EntityId), "装填未完成");
+                    continue;
+                }
+
+                // 开火要从储能池抽一笔电。抽不出来就不打——能源见底时武器和推进一起哑火。
+                if (!PowerSystem.TryConsumeShot(w, s))
+                {
+                    w.Emit("PowerLow", s.Id, default(EntityId), "能源不足，无法开火");
                     continue;
                 }
 
@@ -101,5 +108,7 @@ namespace StarPawn.Combat.Domain.Systems
             float rad = offsetDeg * Deg2Rad;
             return (dir * (float)Math.Cos(rad) + perp * (float)Math.Sin(rad)).Normalized;
         }
+
+        private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
     }
 }

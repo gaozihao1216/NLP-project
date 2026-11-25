@@ -61,7 +61,7 @@ namespace StarPawn.Combat.Domain
                 X = e.Spawn.X, Y = e.Spawn.Y, Z = e.Spawn.Z,
                 Yaw = e.Spawn.Yaw, Pitch = e.Spawn.Pitch, Roll = e.Spawn.Roll,
                 Speed = 0f, Health01 = e.InheritedHull01, IsAlive = true, Reload01 = 1f,
-                Shield01 = 1f, PowerMode = PowerPreset.Balanced
+                Shield01 = 1f, PowerMode = PowerPreset.Balanced, Energy01 = 1f
             };
         }
 
@@ -111,6 +111,13 @@ namespace StarPawn.Combat.Domain
                     Preset = power.Preset
                 };
                 foreach (var s in _snapshot.Ships) s.PowerMode = power.Preset;
+                return CommandResult.Ok();
+            }
+            if (command is LockTargetCommand lockCmd)
+            {
+                // 假实现不解算提前量，只把锁定关系记下来，够 UI 流程跑通。
+                foreach (var s in _snapshot.Ships)
+                    if (s.ShipId == lockCmd.ShipId) s.LockedTargetId = lockCmd.TargetId;
                 return CommandResult.Ok();
             }
             return CommandResult.Fail("UNSUPPORTED_COMMAND", "假实现不支持该命令: " + command.GetType().Name);

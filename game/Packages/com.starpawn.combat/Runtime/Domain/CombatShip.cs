@@ -7,6 +7,36 @@ using StarPawn.Foundation;
 
 namespace StarPawn.Combat.Domain
 {
+    /// <summary>
+    /// 能量三路分配。**每舰一份**：不同舰可以各自处在导航/交战档，不存在「全队共用一套」。
+    /// 原作里靠一句口令切换，所以这里仍是整体预设，不是实时滑条。
+    /// </summary>
+    public struct PowerAllocation
+    {
+        public float Propulsion;
+        public float Shield;
+        public float Weapons;
+        public PowerPreset Preset;
+
+        public static PowerAllocation Balanced => ForPreset(PowerPreset.Balanced);
+
+        /// <summary>三档预设。和必须为 1，由 BattleRules.ValidatePower 把关。</summary>
+        public static PowerAllocation ForPreset(PowerPreset preset)
+        {
+            switch (preset)
+            {
+                case PowerPreset.Navigation:
+                    return new PowerAllocation { Propulsion = 0.5f, Shield = 0.2f, Weapons = 0.3f, Preset = preset };
+                case PowerPreset.Engagement:
+                    return new PowerAllocation { Propulsion = 0.2f, Shield = 0.3f, Weapons = 0.5f, Preset = preset };
+                case PowerPreset.Custom:
+                case PowerPreset.Balanced:
+                default:
+                    return new PowerAllocation { Propulsion = 0.34f, Shield = 0.33f, Weapons = 0.33f, Preset = preset };
+            }
+        }
+    }
+
     public sealed class CombatShip
     {
         // 身份
@@ -40,6 +70,22 @@ namespace StarPawn.Combat.Domain
         public float Hull;
         public float Shield;
 
+        // 能源：每舰独立。主舰真正消耗，其它舰按「满电」处理（见 SimulatesEnergy）。
+        public PowerAllocation Power = PowerAllocation.Balanced;
+        /// <summary>当前储能点数（0..Stats.Power.Capacity），不是百分比。</summary>
+        public float Energy;
+        /// <summary>
+        /// 是否参与能源消耗模拟。阶段一是「只算主舰」：玩家旗舰扣电，护航舰与敌舰视为反应堆余量充足。
+        /// 放开成全队模拟只需把这个标记在 MakeShip 里改成 true。
+        /// </summary>
+        public bool SimulatesEnergy;
+        /// <summary>能源见底导致推进被锁：推力档位已被强制归零，回充到 RestartFraction 才解锁。</summary>
+        public bool PropulsionLocked;
+
+        // 锁定
+        public EntityId LockedTargetId;
+        public bool HasLock => !LockedTargetId.IsEmpty;
+
         // 武器
         public float ReloadTimer;
         public Vec3 AimPoint;
@@ -53,6 +99,8 @@ namespace StarPawn.Combat.Domain
         public Vec3 Forward => Attitude.Forward;
         public float Health01 => Stats != null && Stats.MaxHull > 0f ? Hull / Stats.MaxHull : 0f;
         public float Shield01 => Stats != null && Stats.ShieldCapacity > 0f ? Shield / Stats.ShieldCapacity : 0f;
+        public float Energy01 => Stats != null && Stats.Power.Capacity > 0f ? Energy / Stats.Power.Capacity : 0f;
+        public float EnergyMax => Stats != null ? Stats.Power.Capacity : 0f;
         public float Reload01
         {
             get

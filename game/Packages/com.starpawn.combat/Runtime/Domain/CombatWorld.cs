@@ -9,18 +9,6 @@ using StarPawn.Foundation;
 
 namespace StarPawn.Combat.Domain
 {
-    /// <summary>能量三路分配。全队共用一套预设，原作里是一句口令切换。</summary>
-    public struct PowerAllocation
-    {
-        public float Propulsion;
-        public float Shield;
-        public float Weapons;
-        public PowerPreset Preset;
-
-        public static PowerAllocation Balanced => new PowerAllocation
-        { Propulsion = 0.34f, Shield = 0.33f, Weapons = 0.33f, Preset = PowerPreset.Balanced };
-    }
-
     public sealed class CombatWorld
     {
         public BattleStartSpec Spec;
@@ -34,8 +22,6 @@ namespace StarPawn.Combat.Domain
 
         public BattlePhase Phase = BattlePhase.Running;
         public readonly List<BattleEvent> Events = new List<BattleEvent>();
-
-        public PowerAllocation Power = PowerAllocation.Balanced;
 
         /// <summary>滚转姿态回平（可选层，默认关闭）。太空没有「上」，所以不默认开启。</summary>
         public bool RollLeveling;

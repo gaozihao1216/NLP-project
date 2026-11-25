@@ -210,17 +210,23 @@ namespace StarPawn.Application
             }
         }
 
-        // 机动参数的临时数值同步：与 content/ships 的 combat.maneuver 保持一致。
-        // 真正的配置加载器是 B 的第二周任务，落地后这两行与本方法一起删掉。
+        // 机动与能源参数的临时数值同步：与 content/ships 的 combat.maneuver / combat.power 保持一致。
+        // 真正的配置加载器是 B 的第二周任务，落地后这几行与本方法一起删掉。
         private static readonly ManeuverProfile CruiserManeuver =
             new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f);
 
         private static readonly ManeuverProfile CorvetteManeuver =
             new ManeuverProfile(4.0f, 45f, 27f, 81f, 180f, 108f, 324f);
 
+        private static readonly PowerProfile CruiserPower =
+            new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 1.3f, 7f, 0.18f);
+
+        private static readonly PowerProfile CorvettePower =
+            new PowerProfile(80f, 4.2f, 4.8f, 0.5f, 0.9f, 2.5f, 0.2f);
+
         /// <summary>
         /// 由持久状态解析战斗属性。当前用固定基线，接内容加载后从 content/ships/ 读并按立方律换算。
-        /// 半径与机动参数必须显式给：它们决定舰级手感，不能靠血量或转速反推。
+        /// 半径、机动与能源参数必须显式给：它们决定舰级手感，不能靠血量或转速反推。
         /// </summary>
         private static ResolvedShipStats ResolveStats(OwnedShipState ship)
         {
@@ -238,7 +244,8 @@ namespace StarPawn.Application
                 accuracy01: flagship ? 0.92f : 0.85f,
                 hullRadiusKm: flagship ? 0.37f : 0.20f,
                 maneuver: flagship ? CruiserManeuver : CorvetteManeuver,
-                maxSpreadDeg: ResolvedShipStats.DefaultMaxSpreadDeg);
+                maxSpreadDeg: ResolvedShipStats.DefaultMaxSpreadDeg,
+                power: flagship ? CruiserPower : CorvettePower);
         }
 
         // ---- 战斗会话控制：表现层只通过门面推进，不直接持有 Combat ----

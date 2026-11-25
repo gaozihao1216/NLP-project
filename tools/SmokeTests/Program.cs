@@ -202,9 +202,12 @@ internal static class Program
             Check("超过四分队被拒绝", BattleRules.ValidateSpec(bad).Error.Code == "SQUAD_OUT_OF_RANGE");
             Check("负能量投入被拒绝",
                 !BattleRules.ValidatePower(new PowerAllocationCommand
-                { Propulsion = 1.2f, Shield = -0.2f, Weapons = 0f }).Success);
+                { ShipId = new EntityId("ship.x"), Propulsion = 1.2f, Shield = -0.2f, Weapons = 0f }).Success);
             Check("合法三路能量通过",
                 BattleRules.ValidatePower(new PowerAllocationCommand
+                { ShipId = new EntityId("ship.x"), Propulsion = 0.3f, Shield = 0.3f, Weapons = 0.4f }).Success);
+            Check("缺少舰船 ID 的能量命令被拒绝",
+                !BattleRules.ValidatePower(new PowerAllocationCommand
                 { Propulsion = 0.3f, Shield = 0.3f, Weapons = 0.4f }).Success);
         }
 
@@ -387,6 +390,226 @@ internal static class Program
             Check("真实战斗：敌舰主动接近", closedIn, "z=" + snap.Ships[1].Z.ToString("0.0"));
             Check("真实战斗：命中造成掉血", hurt,
                 "shield=" + snap.Ships[0].Shield01.ToString("0.00") + " hull=" + snap.Ships[0].Health01.ToString("0.00"));
+        }
+
+        // 19. 能源：满推力持续消耗 → 耗尽锁推进 → 回充后恢复
+        {
+            // 小容量 + 低再生 + 高耗电，10 秒左右就能把电打空，不必真跑五分钟。
+            var power = new PowerProfile(40f, 1.0f, 5.0f, 0f, 0f, 1f, 0.25f);
+            var spec = new BattleStartSpec
+            {
+                BattleId = new EntityId("battle.energy"),
+                MissionId = "mission.smoke",
+                OriginSystemId = new EntityId("sys.kaila"),
+                TargetSystemId = new EntityId("sys.kaila"),
+                Allies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("ally.flagship"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Flagship, SquadIndex = 0,
+                        Spawn = new SpawnPoint(0f, 0f, 0f, 0f, 0f, 0f),
+                        Stats = new ResolvedShipStats(200f, 200f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                            0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f, power),
+                        InheritedHull01 = 1f
+                    }
+                },
+                Enemies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("enemy.far"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Escort, SquadIndex = 1,
+                        Spawn = new SpawnPoint(0f, 0f, 500f, 180f, 0f, 0f),
+                        Stats = new ResolvedShipStats(120f, 20f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                            0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f, power),
+                        InheritedHull01 = 1f
+                    }
+                },
+                BattlefieldLayout = "open_space",
+                Objective = new BattleObjective { Kind = "DestroyAll", TimeLimitSeconds = 300f },
+                RandomSeed = 11,
+                FixedStep = 1f / 30f
+            };
+
+            var rt = new StarPawn.Combat.Domain.CombatRuntime();
+            rt.Initialize(spec);
+            Check("初始能源为满", rt.ReadSnapshot().Ships[0].Energy01 > 0.99f);
+
+            // 限速故意设到 200，让这条只测能源：否则速度被钳在 20，熄火后「速度不变」就是假通过。
+            var helm = new HelmCommand { ShipId = new EntityId("ally.flagship"), Thrust = 1f };
+            bool sawEmpty = false;
+            for (int i = 0; i < 450; i++)
+            {
+                rt.Submit(helm);
+                rt.Step();
+                foreach (var e in rt.DrainEvents()) if (e.Kind == "PowerEmpty") sawEmpty = true;
+            }
+
+            var locked = rt.ReadSnapshot().Ships[0];
+            Check("满推力会把主舰能源打空", sawEmpty && locked.Energy01 < 0.25f,
+                "energy=" + locked.Energy01.ToString("0.000"));
+            Check("能源耗尽后推进被锁", locked.PropulsionLocked);
+
+            // 熄火后继续提交满推：档位必须被当 tick 的能源结算清零，速度靠惯性保持。
+            float speedAtLock = locked.Speed;
+            for (int i = 0; i < 90; i++) { rt.Submit(helm); rt.Step(); }     // 熄火后再推 3 s
+            var coasting = rt.ReadSnapshot().Ships[0];
+            Check("熄火期间推力被强制归零", Math.Abs(coasting.Speed - speedAtLock) < 1e-3f,
+                "Δv=" + (coasting.Speed - speedAtLock).ToString("0.0000") +
+                " speed=" + coasting.Speed.ToString("0.000"));
+
+            float energyAtLock = locked.Energy01;
+            for (int i = 0; i < 600; i++) rt.Step();                          // 停推 20 s 回充
+            var restored = rt.ReadSnapshot().Ships[0];
+            Check("回充过阈值后推进恢复", !restored.PropulsionLocked, "energy=" + restored.Energy01.ToString("0.000"));
+            Check("回充确实让能源回升", restored.Energy01 > energyAtLock + 0.3f,
+                "lock=" + energyAtLock.ToString("0.000") + " now=" + restored.Energy01.ToString("0.000"));
+        }
+
+        // 20. 推力方向恒为舰体主轴：偏航 90° 朝 +X，加速必须落在 +X 上
+        {
+            var spec = new BattleStartSpec
+            {
+                BattleId = new EntityId("battle.thrust"),
+                MissionId = "mission.smoke",
+                OriginSystemId = new EntityId("sys.kaila"),
+                TargetSystemId = new EntityId("sys.kaila"),
+                Allies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("ally.t"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Flagship, SquadIndex = 0,
+                        // 偏航 90° → 舰首指 +X，而不是世界 +Z
+                        Spawn = new SpawnPoint(0f, 0f, 0f, 90f, 0f, 0f),
+                        Stats = new ResolvedShipStats(200f, 20f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                            0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f),
+                        InheritedHull01 = 1f
+                    }
+                },
+                Enemies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("enemy.t"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Escort, SquadIndex = 1,
+                        Spawn = new SpawnPoint(0f, 0f, 500f, 180f, 0f, 0f),
+                        Stats = new ResolvedShipStats(120f, 20f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                            0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f),
+                        InheritedHull01 = 1f
+                    }
+                },
+                BattlefieldLayout = "open_space",
+                Objective = new BattleObjective { Kind = "DestroyAll", TimeLimitSeconds = 300f },
+                RandomSeed = 12,
+                FixedStep = 1f / 30f
+            };
+
+            var rt = new StarPawn.Combat.Domain.CombatRuntime();
+            rt.Initialize(spec);
+            rt.Submit(new HelmCommand { ShipId = new EntityId("ally.t"), Thrust = 1f });
+            rt.Step();
+
+            var s = rt.ReadSnapshot().Ships[0];
+            // 2.5 km/s² × 1/30 s ≈ 0.083 km/s，全部落在 +X
+            Check("推力沿舰体主轴而非世界轴", s.Vx > 0.07f && Math.Abs(s.Vz) < 1e-3f,
+                "v=(" + s.Vx.ToString("0.000") + ", " + s.Vy.ToString("0.000") + ", " + s.Vz.ToString("0.000") + ")");
+
+            // 档位是粘滞的：不再发命令也会继续推，20 s 后必然顶到限速（20 km/s）。
+            for (int i = 0; i < 600; i++) rt.Step();
+            var capped = rt.ReadSnapshot().Ships[0];
+            Check("航速被钳在舰体限速", Math.Abs(capped.Speed - 20f) < 0.01f, "speed=" + capped.Speed.ToString("0.000"));
+            Check("限速不改变推力方向", Math.Abs(capped.Vx - 20f) < 0.05f && Math.Abs(capped.Vz) < 1e-3f,
+                "v=(" + capped.Vx.ToString("0.00") + ", " + capped.Vz.ToString("0.000") + ")");
+        }
+
+        // 21. 目标锁定：解提前量、超距与友军拒绝
+        {
+            var spec = new BattleStartSpec
+            {
+                BattleId = new EntityId("battle.lock"),
+                MissionId = "mission.smoke",
+                OriginSystemId = new EntityId("sys.kaila"),
+                TargetSystemId = new EntityId("sys.kaila"),
+                Allies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("ally.l"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Flagship, SquadIndex = 0,
+                        Spawn = new SpawnPoint(0f, 0f, 0f, 0f, 0f, 0f),
+                        Stats = new ResolvedShipStats(200f, 20f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                            0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f),
+                        InheritedHull01 = 1f
+                    },
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("ally.wing"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Escort, SquadIndex = 1,
+                        Spawn = new SpawnPoint(10f, 0f, -10f, 0f, 0f, 0f),
+                        Stats = new ResolvedShipStats(120f, 20f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                            0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f),
+                        InheritedHull01 = 1f
+                    }
+                },
+                Enemies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("enemy.near"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Escort, SquadIndex = 2,
+                        Spawn = new SpawnPoint(0f, 0f, 100f, 180f, 0f, 0f),
+                        Stats = new ResolvedShipStats(120f, 20f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                            0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f),
+                        InheritedHull01 = 1f
+                    },
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("enemy.far"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Escort, SquadIndex = 3,
+                        Spawn = new SpawnPoint(0f, 0f, 600f, 180f, 0f, 0f),
+                        Stats = new ResolvedShipStats(120f, 20f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                            0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f),
+                        InheritedHull01 = 1f
+                    }
+                },
+                BattlefieldLayout = "open_space",
+                Objective = new BattleObjective { Kind = "DestroyAll", TimeLimitSeconds = 300f },
+                RandomSeed = 13,
+                FixedStep = 1f / 30f
+            };
+
+            var rt = new StarPawn.Combat.Domain.CombatRuntime();
+            rt.Initialize(spec);
+            var ally = new EntityId("ally.l");
+
+            var lockOk = rt.Submit(new LockTargetCommand { ShipId = ally, TargetId = new EntityId("enemy.near") });
+            Check("锁定射程内敌舰成功", lockOk.Success, lockOk.Error.Code);
+
+            var snap = rt.ReadSnapshot();
+            Check("快照记录锁定目标", snap.Ships[0].LockedTargetId == new EntityId("enemy.near"));
+            Check("锁定后立即有瞄准点", snap.Ships[0].HasAim);
+
+            // 打几 tick，让目标横向移动，再看提前量是否领先于目标当前位置
+            for (int i = 0; i < 30; i++) rt.Step();
+            snap = rt.ReadSnapshot();
+            var aim = new Vec3(snap.Ships[0].AimX, snap.Ships[0].AimY, snap.Ships[0].AimZ);
+            ShipSnapshot tgt = null;
+            foreach (var sh in snap.Ships) if (sh.ShipId == new EntityId("enemy.near")) tgt = sh;
+            var tgtPos = new Vec3(tgt.X, tgt.Y, tgt.Z);
+            Check("锁定后解出提前量（瞄准点领先目标）", (aim - tgtPos).Length > 0.05f,
+                "偏差 " + (aim - tgtPos).Length.ToString("0.00") + " km");
+
+            var tooFar = rt.Submit(new LockTargetCommand { ShipId = ally, TargetId = new EntityId("enemy.far") });
+            Check("超出锁定距离被拒绝", !tooFar.Success && tooFar.Error.Code == "LOCK_OUT_OF_RANGE", tooFar.Error.Code);
+
+            var friendly = rt.Submit(new LockTargetCommand { ShipId = ally, TargetId = new EntityId("ally.wing") });
+            Check("锁定友军被拒绝", !friendly.Success && friendly.Error.Code == "FRIENDLY_TARGET", friendly.Error.Code);
+
+            var clear = rt.Submit(new LockTargetCommand { ShipId = ally });
+            Check("空目标等于解除锁定",
+                clear.Success && rt.ReadSnapshot().Ships[0].LockedTargetId.IsEmpty);
         }
 
         Console.WriteLine($"\n=== 结果：{_passed} 通过，{_failed} 失败 ===");

@@ -2,6 +2,11 @@
 //
 // 自动回正不是「把角速度设成 0」，而是飞控给出一个反向角加速度，让 ω 按同一条积分公式
 // 线性减到 0。玩家输入和飞控输出因此共用一条通道（StepAxis），只有一个写 ω 的地方。
+//
+// 两条必须守住的前提：
+//   1) 推力方向恒为舰体主轴（局部 +Z → 世界 Forward）。推力与速度方向无关，
+//      侧滑/倒飞时舰照样沿舰首加速，这正是「无阻力空间 + 主推进」该有的行为。
+//   2) 速度是矢量、姿态是四元数，两者完全解耦：转向不改变速度，只改变下一 tick 的推力方向。
 
 using System;
 using StarPawn.Combat.Contracts;
@@ -26,11 +31,22 @@ namespace StarPawn.Combat.Domain.Systems
                 s.PrevPos = s.Pos;
                 var m = s.Stats.Maneuver;
 
-                // 主推力沿舰首。档位值直接当 setpoint，不做速度闭环——真空里档位控的是加速度。
-                Vec3 forward = s.Attitude.Forward;
-                s.Velocity = s.Velocity + forward * (m.MaxThrustKmS2 * s.ThrustSetpoint * dt);
+                // 主推力沿舰首：Forward = 姿态四元数旋转 (0,0,1)，任何时候都不改方向。
+                // 档位值直接当 setpoint，不做速度闭环——真空里档位控的是加速度。
+                float thrust = s.PropulsionLocked ? 0f : s.ThrustSetpoint;
+                Vec3 accel = s.Attitude.Forward * (m.MaxThrustKmS2 * thrust * dt);
 
-                // 战术航速软上限（游戏性让步，不是物理）
+                // 战术航速上限（游戏性让步，不是物理）：已到顶且推力还在往同方向推，就不再施力。
+                // 否则玩家会看到「推力满档但速度纹丝不动」，还会在钳速时突然掉速。
+                if (thrust > 0f && s.Velocity.Length >= s.Stats.MaxSpeedKps &&
+                    Vec3.Dot(accel, s.Velocity) > 0f)
+                {
+                    accel = Vec3.Zero;
+                }
+
+                s.Velocity = s.Velocity + accel;
+
+                // 超限只削大小、不改方向：转向后横向分量可能与原有速度叠加突破上限。
                 float speed = s.Velocity.Length;
                 if (speed > s.Stats.MaxSpeedKps && speed > 1e-5f)
                     s.Velocity = s.Velocity * (s.Stats.MaxSpeedKps / speed);

@@ -25,13 +25,16 @@ internal static class Program
         {
             ["ship.a_patrol"] = new ResolvedShipStats(
                 120f, 32f, 45f, 20f, 180f, 220f, 3.2f, 80f, 3f, 0.85f,
-                0.20f, new ManeuverProfile(4.0f, 45f, 27f, 81f, 180f, 108f, 324f), 1.0f),
+                0.20f, new ManeuverProfile(4.0f, 45f, 27f, 81f, 180f, 108f, 324f), 1.0f,
+                new PowerProfile(80f, 4.2f, 4.8f, 0.5f, 0.9f, 2.5f, 0.2f)),
             ["ship.d_destroyer"] = new ResolvedShipStats(
                 300f, 28f, 32f, 40f, 240f, 260f, 4.5f, 160f, 5f, 0.88f,
-                0.27f, new ManeuverProfile(3.5f, 32f, 19f, 58f, 128f, 76f, 230f), 1.0f),
+                0.27f, new ManeuverProfile(3.5f, 32f, 19f, 58f, 128f, 76f, 230f), 1.0f,
+                new PowerProfile(140f, 3.6f, 4.4f, 0.7f, 1.1f, 4.5f, 0.2f)),
             ["ship.g_cruiser"] = new ResolvedShipStats(
                 800f, 20f, 20f, 100f, 320f, 300f, 6f, 300f, 8f, 0.92f,
-                0.37f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1.0f),
+                0.37f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1.0f,
+                new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 1.3f, 7f, 0.18f)),
         };
 
     private static int Main(string[] args)
@@ -180,10 +183,20 @@ internal static class Program
                 Roll = 0f,
                 FlightAssist = true
             });
-            runtime.Submit(new AimCommand
+
+            if (useLead)
             {
-                ShipId = s.ShipId, WorldX = aim.X, WorldY = aim.Y, WorldZ = aim.Z
-            });
+                // 正常玩法：锁定目标，提前量由仿真每 tick 解算（和 HUD 准星同源）。
+                runtime.Submit(new LockTargetCommand { ShipId = s.ShipId, TargetId = target.ShipId });
+            }
+            else
+            {
+                // 对照组：不锁定，手动把瞄准点指向目标当前位置——没有提前量。
+                runtime.Submit(new AimCommand
+                {
+                    ShipId = s.ShipId, WorldX = targetPos.X, WorldY = targetPos.Y, WorldZ = targetPos.Z
+                });
+            }
 
             float dist = (aim - pos).Length;
             if (dist <= stats.GunRangeKm * 0.95f &&
@@ -238,7 +251,9 @@ internal static class Program
             " 半径 " + s.HullRadiusKm.ToString("0.00") + "km" +
             " 推力 " + m.MaxThrustKmS2.ToString("0.0") + "km/s²" +
             " 转速 " + m.YawRateDps.ToString("0") + "/" + m.PitchRateDps.ToString("0") + "/" + m.RollRateDps.ToString("0") + "°/s" +
-            " 角加速度 " + m.YawAccelDps2.ToString("0") + "/" + m.PitchAccelDps2.ToString("0") + "/" + m.RollAccelDps2.ToString("0") + "°/s²");
+            " 角加速度 " + m.YawAccelDps2.ToString("0") + "/" + m.PitchAccelDps2.ToString("0") + "/" + m.RollAccelDps2.ToString("0") + "°/s²" +
+            " 限速 " + s.MaxSpeedKps.ToString("0") + "km/s" +
+            " 能源 " + s.Power.Capacity.ToString("0") + "点/再生 " + s.Power.RegenPerSec.ToString("0.0") + "/s");
     }
 
     private static void PrintStatus(CombatRuntime runtime, int tick)
@@ -253,7 +268,9 @@ internal static class Program
                 " v=" + s.Speed.ToString("0.0") + "km/s" +
                 " hp=" + s.Health01.ToString("0.00") +
                 " sh=" + s.Shield01.ToString("0.00") +
-                " 转速 " + s.YawRate.ToString("0.0") + "/" + s.PitchRate.ToString("0.0") + "°/s");
+                " en=" + s.Energy01.ToString("0.00") + (s.PropulsionLocked ? "(熄火)" : "") +
+                " 转速 " + s.YawRate.ToString("0.0") + "/" + s.PitchRate.ToString("0.0") + "°/s" +
+                (s.LockedTargetId.IsEmpty ? "" : " 锁定 " + s.LockedTargetId));
         }
     }
 

@@ -14,15 +14,8 @@ namespace StarPawn.Combat.Domain.Systems
     {
         public static void Step(CombatWorld w, float dt)
         {
-            // 护盾随能量投入恢复：均衡档（Shield≈0.33）恰好是标称回充速率，全给护盾是三倍。
-            float shieldShare = w.Power.Shield * 3f;
-            for (int i = 0; i < w.Ships.Count; i++)
-            {
-                var ship = w.Ships[i];
-                if (!ship.IsAlive || ship.Shield >= ship.Stats.ShieldCapacity) continue;
-                ship.Shield += ship.Stats.ShieldRegenPerSec * shieldShare * dt;
-                if (ship.Shield > ship.Stats.ShieldCapacity) ship.Shield = ship.Stats.ShieldCapacity;
-            }
+            // 护盾回充不在这里——它是一条耗电通路，统一由 PowerSystem 处理。
+            // 这里只负责命中判定与扣血。
 
             for (int i = 0; i < w.Shells.Count; i++)
             {

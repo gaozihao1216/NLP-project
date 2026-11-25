@@ -57,7 +57,12 @@ namespace StarPawn.Combat.Domain
                 // 战损继承就在这里落地：上一场的完整度直接决定本场初始血量。
                 Hull = e.Stats.MaxHull * e.InheritedHull01,
                 Shield = e.Stats.ShieldCapacity,
-                ReloadTimer = 0f
+                ReloadTimer = 0f,
+                // 能源每舰一份，但阶段一只模拟主舰：护航舰与敌舰按满电处理，省算力也不影响手感。
+                Power = PowerAllocation.Balanced,
+                Energy = e.Stats.Power.Capacity,
+                SimulatesEnergy = ally && e.Role == SquadRole.Flagship,
+                LockedTargetId = default(EntityId)
             };
             s.PrevPos = s.Pos;
             return s;
@@ -105,6 +110,32 @@ namespace StarPawn.Combat.Domain
             {
                 var check = BattleRules.ValidatePower(power);
                 if (!check.Success) return check;
+                if (_w.FindShip(power.ShipId) == null)
+                    return CommandResult.Fail("NO_SUCH_SHIP", "没有该舰: " + power.ShipId);
+            }
+            else if (command is LockTargetCommand lockCmd)
+            {
+                if (lockCmd.ShipId.IsEmpty)
+                    return CommandResult.Fail("BAD_SHIP_ID", "锁定命令缺少舰船 ID");
+                var self = _w.FindShip(lockCmd.ShipId);
+                if (self == null)
+                    return CommandResult.Fail("NO_SUCH_SHIP", "没有该舰: " + lockCmd.ShipId);
+
+                // 空目标等于解除锁定，不需要再校验。
+                if (!lockCmd.TargetId.IsEmpty)
+                {
+                    var target = _w.FindShip(lockCmd.TargetId);
+                    if (target == null)
+                        return CommandResult.Fail("NO_SUCH_TARGET", "没有该目标: " + lockCmd.TargetId);
+                    if (!target.IsAlive)
+                        return CommandResult.Fail("TARGET_DEAD", "目标已被击沉: " + lockCmd.TargetId);
+                    if (target.IsAlly == self.IsAlly)
+                        return CommandResult.Fail("FRIENDLY_TARGET", "不能锁定己方舰船: " + lockCmd.TargetId);
+                    float lockRange = self.Stats.GunRangeKm * BattleRules.LockRangeFactor;
+                    if (Vec3.Distance(self.Pos, target.Pos) > lockRange)
+                        return CommandResult.Fail("LOCK_OUT_OF_RANGE",
+                            "超出锁定距离 " + lockRange.ToString("0") + " km");
+                }
             }
             else if (command is FireCommand || command is AimCommand)
             {
@@ -133,11 +164,17 @@ namespace StarPawn.Combat.Domain
 
             ApplyPendingCommands();
 
-            // 2. 敌舰 AI 读上一 tick 末状态生成意图。
+            // 2. 能源按本 tick 的推力档位、操舵输入与护盾需求扣电；耗尽则推进归零。
+            //    必须排在 Movement 之前，让物理读到的是已经过能源约束的档位。
+            PowerSystem.Step(_w, dt);
+
+            // 3. 敌舰 AI 读上一 tick 末状态生成意图。
             SimpleEnemyController.Step(_w);
 
-            // 3. 物理与武器，顺序固定。
+            // 4. 物理与武器，顺序固定。
+            //    Targeting 紧跟 Movement：位置/速度是本 tick 最新的，解出的提前量才不回退一帧。
             MovementSystem.Step(_w, dt);
+            TargetingSystem.Step(_w);
             WeaponSystem.Step(_w, dt);
             ProjectileSystem.Step(_w, dt);
             DamageSystem.Step(_w, dt);
@@ -177,13 +214,36 @@ namespace StarPawn.Combat.Domain
                 }
                 else if (cmd is PowerAllocationCommand power)
                 {
-                    _w.Power = new PowerAllocation
+                    // 能源分配是每舰自己的，不是全队共用一条口令。
+                    ship.Power = new PowerAllocation
                     {
                         Propulsion = power.Propulsion,
                         Shield = power.Shield,
                         Weapons = power.Weapons,
                         Preset = power.Preset
                     };
+                }
+                else if (cmd is LockTargetCommand lockCmd)
+                {
+                    if (lockCmd.TargetId.IsEmpty)
+                    {
+                        ship.LockedTargetId = default(EntityId);
+                        ship.HasAim = false;
+                        _w.Emit("LockCleared", ship.Id, default(EntityId), "解除锁定");
+                    }
+                    else
+                    {
+                        ship.LockedTargetId = lockCmd.TargetId;
+                        // 瞄准点本 tick 就能用：不必等 TargetingSystem 下一轮。
+                        var target = _w.FindShip(lockCmd.TargetId);
+                        if (target != null)
+                        {
+                            ship.AimPoint = target.Pos;
+                            ship.HasAim = true;
+                            _w.Emit("Locked", ship.Id, target.Id,
+                                "距离 " + Vec3.Distance(ship.Pos, target.Pos).ToString("0") + " km");
+                        }
+                    }
                 }
             }
             _pending.Clear();
@@ -218,7 +278,14 @@ namespace StarPawn.Combat.Domain
                     IsAlive = s.IsAlive,
                     Reload01 = s.Reload01,
                     Shield01 = s.Shield01,
-                    PowerMode = _w.Power.Preset
+                    PowerMode = s.Power.Preset,
+                    Energy01 = s.Energy01,
+                    PropulsionLocked = s.PropulsionLocked,
+                    LockedTargetId = s.LockedTargetId,
+                    AimX = s.AimPoint.X,
+                    AimY = s.AimPoint.Y,
+                    AimZ = s.AimPoint.Z,
+                    HasAim = s.HasAim
                 };
             }
 

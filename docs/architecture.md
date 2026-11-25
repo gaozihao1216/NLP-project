@@ -194,8 +194,8 @@ Unity 侧：用 Unity 2021.3 打开 `game/` 目录。`StarPawn.Presentation` 目
 Domain/
   Vec3(在 Contracts)  Quat.cs  CombatWorld.cs  CombatShip.cs  Projectile.cs  Obstacle.cs  CombatRuntime.cs
   Systems/
-    MovementSystem.cs  WeaponSystem.cs  ProjectileSystem.cs  DamageSystem.cs
-    ObjectiveSystem.cs  SimpleEnemyController.cs
+    MovementSystem.cs  PowerSystem.cs  TargetingSystem.cs  WeaponSystem.cs
+    ProjectileSystem.cs  DamageSystem.cs  ObjectiveSystem.cs  SimpleEnemyController.cs
 ```
 
 ### 1. 空间与命令契约
@@ -204,8 +204,10 @@ Domain/
 - `SpawnPoint(x,y,z,yaw,pitch,roll)`，保留 3 参构造（等价于 z=pitch=roll=0），旧调用点不用改。
 - `HelmCommand { Thrust, Yaw, Pitch, Roll, FlightAssist }`：`Thrust` 是主推力归一化输入（档位值，-0.5 反推），
   三轴是**角加速度输入**而不是转速；`FlightAssist` 是 sticky 开关，仿真记住最近一次值。
-- 快照带位置、姿态（Yaw/Pitch/Roll）、速度三分量、三轴角速度。姿态内部用四元数，
-  导出时才转欧拉角，约定与 Unity 的 `Quaternion.Euler(pitch, yaw, roll)` 一致。
+- `PowerAllocationCommand { ShipId, Propulsion, Shield, Weapons, Preset }`：能源是每舰一份，必须指定舰船。
+- `LockTargetCommand { ShipId, TargetId }`：锁定目标，`TargetId` 为空即解除；细节见第 9 节。
+- 快照带位置、姿态（Yaw/Pitch/Roll）、速度三分量、三轴角速度、能源比例、锁定目标与解算出的瞄准点。
+  姿态内部用四元数，导出时才转欧拉角，约定与 Unity 的 `Quaternion.Euler(pitch, yaw, roll)` 一致。
 
 ### 2. 机动参数全部来自舰体配置
 
@@ -224,7 +226,11 @@ B 的配置加载器落地后整段删除。
 ### 3. 运动：无阻力 + 档位推力 + 反喷回正
 
 - 推力沿舰首：`v += forward × MaxThrust × ThrustSetpoint × dt`，没有阻力项，松档位靠惯性滑行。
-- 战术航速软上限 `MaxSpeedKps`（游戏性让步，不是物理）：超了等比缩回。
+  `forward` 是姿态四元数旋转局部 `(0,0,1)` 的结果，所以推力**恒沿舰体主轴**——侧滑、倒飞、被撞歪之后
+  都照样沿舰首加速，这是「无阻力真空 + 主推进」的必然结果，不是简化。姿态与速度完全解耦：
+  转向只改下一 tick 的推力方向，不改当前速度。
+- 战术航速软上限 `MaxSpeedKps`（游戏性让步，不是物理）：已到顶且推力还在往同向推时**不再施力**
+  （避免「满档推不动」），超限部分按比例削回——只改速度大小、不改方向。
 - 档位控的是**加速度**而不是航速，所以 HUD 必须同时显示档位与当前加速度，否则玩家以为档位没生效。
 - 回正不是「把 ω 设成 0」，而是飞控给一个反向角加速度，和玩家输入共用同一条积分通道：
 
@@ -244,7 +250,7 @@ u = clamp(u, -1, 1)
 
 ### 4. 武器、散布、碰撞
 
-- 装填：`ReloadSeconds × (1.4 - 0.8 × WeaponsShare)`，交战档最快。
+- 装填：`ReloadSeconds × (1.4 - 0.8 × 本舰 WeaponsShare)`，交战档最快。
 - 射界：固定炮有 ±15° 锥，瞄准点出锥时钳到锥边并上报 `OutOfArc` 事件。
 - 散布：`(1 - Accuracy01) × MaxSpreadDeg`，绕理想方向做锥形偏移，每次开火固定消费两个随机数。
   上限取 **1.0°**：在 60% 射程上落点散布半径约 1.4 倍舰体半径，命中率落在三到五成。
@@ -271,15 +277,90 @@ relVel = targetVel - shooterVel
 
 ### 6. 执行顺序与确定性
 
-`Step()` 固定顺序：角速度输入归零 → 应用待处理命令 → 敌舰 AI → 运动 → 武器 → 弹道 → 伤害 → 胜负 → 时钟推进。
+`Step()` 固定顺序：角速度输入归零 → 应用待处理命令 → **能源结算** → 敌舰 AI → 运动 → **锁定解算** → 武器 → 弹道 → 伤害 → 胜负 → 时钟推进。
+
+能源排在运动之前的理由：`ThrustSetpoint` 与操舵输入已经由命令写好了，先按「这一 tick 打算怎么飞」扣电，
+再决定推力是否被能源锁死；这样 `MovementSystem` 读到的档位一定是已经过能源约束的值，物理侧不需要知道能源存在。
+
+锁定解算紧跟在运动之后：位置与速度是本 tick 最新的，解出的提前量不会比 HUD 慢一帧。
+
 全场一个 `DeterministicRandom`，消费顺序固定（陨石生成 → 每次开火散布）；遍历按 `List` 插入序，
 `Dictionary` 只查不遍历；四元数每 tick 归一化一次；炮弹 ID 用递增整数。
 
 ### 7. 验证方式
 
-- `tools/CombatSimCli`：无 Unity 跑完一局，启动先打印每舰的 `maneuver` 与半径（调参唯一可见入口），
-  再逐 0.5 秒打印位置/姿态/速度/血盾/装填，最后输出 `BattleResult`。参数 `--seed`、`--no-lead`、`--enemies`、`--seconds`、`--quiet`。
+- `tools/CombatSimCli`：无 Unity 跑完一局，启动先打印每舰的 `maneuver`、半径、限速与能源容量（调参唯一可见入口），
+  再逐 0.5 秒打印位置/姿态/速度/血盾/能源/锁定，最后输出 `BattleResult`。
+  参数 `--seed`、`--no-lead`、`--enemies`、`--seconds`、`--quiet`。
+  默认走目标锁定（仿真解提前量），`--no-lead` 改成手动瞄目标当前位置——这是「提前量有效」的对照组。
+- `tools/SmokeTests` 现有 21 个场景块，后三个专测本轮的物理与能源：能源耗尽锁推进/回充恢复、
+  推力沿舰体主轴（偏航 90° 后加速度必须落在 +X）、锁定解提前量与三类拒绝（超距/友军/空目标）。
 - 本机应用控制策略（0x800711C7，Defender 拦截新生成二进制）仍然阻止执行，CLI 与 SmokeTests **只能编译不能运行**。
   换机执行：`dotnet run --project tools/CombatSimCli`、`cd tools/SmokeTests && dotnet run`。
 - 为确认数值可用，用等效的二维模型复算了同一场 2v3：6 个随机种子全部取胜，用时 69–129 s，无僵局；
   关闭提前量则 300 s 打不死任何一艘。
+- 能源曲线同样离线复算（主舰 120 点容量、再生 3.2/s、满推耗电 4.4/s）：
+
+  | 状态 | 首次见底 |
+  | --- | --- |
+  | 纯满推 | 103 s |
+  | 满推 + 三轴满转 | 58 s |
+  | 满推 + 满转 + 护盾回充 | 36 s |
+  | 再加持续开火（6 s 一发） | 25 s |
+  | 半推巡航 | 不会见底 |
+
+  即：正常交战不会因为能源停摆，只有长时间极限机动或边打边充盾才会被逼到熄火——这正是它该有的压力。
+
+### 8. 能源：每舰一份，阶段一只算主舰
+
+**为什么要改**：早先 `PowerAllocation` 挂在 `CombatWorld` 上，是全场共用的一条口令；而推进系统根本没读它，
+`Power.Propulsion` 是个死参数。现在能源归每艘舰自己（`CombatShip.Power` / `Energy`），
+`PowerAllocationCommand` 必须带 `ShipId`，不同舰可以各自处在导航/交战档。
+
+**四路耗电**，全部由舰体配置的 `power` 块给出（`content/ships/*.json`）：
+
+```text
+eff    = 0.55 + 1.35 × Propulsion                // 分给推进的电越多，每单位推力越省
+drain  = PropulsionDrain × |thrust| / eff         // 反推 ×1.4（喷口效率低）
+       + TurnDrain × (|yaw|+|pitch|+|roll|)/3 / eff
+       + ShieldDrain × (Shield × 3)               // 只在回充时计
+Energy += (Regen − drain) × dt                    // 夹到 [0, Capacity]
+开火另扣 WeaponDrainPerShot，扣不出来就打不出去（事件 PowerLow）
+```
+
+护盾回充从 `DamageSystem` 移到了 `PowerSystem`：它是一条耗电通路，不该散落在命中判定里。
+回充速率 = `ShieldRegenPerSec × Shield×3 × 供电系数`，能量低于容量 5% 时按比例衰减到 0（没电就别想充盾）。
+
+**耗尽与恢复**（滞回，避免每 tick 抖一下）：
+
+```text
+Energy == 0                 → PropulsionLocked = true，ThrustSetpoint 强制 0，事件 PowerEmpty
+Energy ≥ Capacity×Restart   → 解锁，事件 PowerRestored
+```
+
+锁定后即使玩家持续提交满推命令，`ApplyPendingCommands` 写入的档位也会被当 tick 的能源结算清零；
+`MovementSystem` 另外再判断一次 `PropulsionLocked`，双保险。滑行期间速度不变（真空无阻力），
+所以熄火惩罚的是**机动**而不是「掉速」。
+
+**阶段一只模拟主舰**：`SimulatesEnergy = ally && Role == Flagship`，护航舰与敌舰按满电处理。
+放开成全队模拟只需改 `MakeShip` 里这一行——模型本身已经是每舰的，不需要重构。
+
+各舰数值：
+
+| 舰型 | 容量 | 再生/s | 满推耗电/s | 转向/s | 充盾/s | 每发 | 重启阈值 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 巡逻艇 | 80 | 4.2 | 4.8 | 0.5 | 0.9 | 2.5 | 20% |
+| 驱逐舰 | 140 | 3.6 | 4.4 | 0.7 | 1.1 | 4.5 | 20% |
+| 巡洋舰 | 120 | 3.2 | 4.4 | 0.9 | 1.3 | 7.0 | 18% |
+
+### 9. 目标锁定
+
+`LockTargetCommand { ShipId, TargetId }`，`TargetId` 留空即解除。锁定后不必再给世界坐标瞄准点：
+
+- 每 tick 由 `TargetingSystem` 用**相对速度**解提前量，写进 `Ship.AimPoint`，快照里带
+  `LockedTargetId` / `AimX/Y/Z` / `HasAim`，HUD 直接画准星。
+- 锁定距离 = `GunRangeKm × 1.2`。给一点余量，让玩家在进射程前先锁上、看见提前量点在动；再远锁定没有意义。
+- 目标死亡、跨阵营、超距 → 自动解锁并发 `LockLost`。不「粘着」一个已经打不到的目标。
+- `Submit` 阶段就拒绝非法锁定（`LOCK_OUT_OF_RANGE` / `FRIENDLY_TARGET` / `TARGET_DEAD` / `NO_SUCH_TARGET`），
+  不让错误命令进入待处理队列——否则玩家看不到失败原因。
+- AI 不走这条通道（它自己算提前量），所以锁定是纯玩家侧的体验改进，不改变敌方行为与已标定的战斗节奏。

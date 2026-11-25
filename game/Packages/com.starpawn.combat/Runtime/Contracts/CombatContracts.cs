@@ -124,6 +124,49 @@ namespace StarPawn.Combat.Contracts
     }
 
     /// <summary>
+    /// 能源参数。同样全部来自舰体配置（content/ships 的 power 块），代码里不写死耗电率。
+    ///
+    /// 单位是「能量点」而不是千瓦：这里的数值只为游戏手感标定，不追求物理量纲一致。
+    /// 容量 / 满推力耗电率 ≈ 满推力能撑的秒数，调手感就调这两个。
+    /// </summary>
+    public readonly struct PowerProfile
+    {
+        /// <summary>储能总量。</summary>
+        public readonly float Capacity;
+        /// <summary>反应堆再生速率（每秒回充点数）。</summary>
+        public readonly float RegenPerSec;
+        /// <summary>主推进满档时的耗电率（每秒）。</summary>
+        public readonly float PropulsionDrainPerSec;
+        /// <summary>三轴姿态控制满输入时的额外耗电率（每秒）。RCS 和主推进共用一路电力。</summary>
+        public readonly float TurnDrainPerSec;
+        /// <summary>护盾按标称速率回充时的耗电率（每秒）。</summary>
+        public readonly float ShieldDrainPerSec;
+        /// <summary>每次开火消耗的点数。</summary>
+        public readonly float WeaponDrainPerShot;
+        /// <summary>
+        /// 推进重启阈值（占容量的比例）。能源耗尽后推进被强制归零，
+        /// 必须回充到这个比例以上才重新可用——滞回是为了避免「一有电就又熄火」的抖动。
+        /// </summary>
+        public readonly float RestartFraction;
+
+        public PowerProfile(float capacity, float regenPerSec, float propulsionDrainPerSec,
+            float turnDrainPerSec, float shieldDrainPerSec, float weaponDrainPerShot, float restartFraction)
+        {
+            Capacity = capacity > 1f ? capacity : 1f;
+            RegenPerSec = regenPerSec > 0f ? regenPerSec : 0f;
+            PropulsionDrainPerSec = propulsionDrainPerSec > 0f ? propulsionDrainPerSec : 0f;
+            TurnDrainPerSec = turnDrainPerSec > 0f ? turnDrainPerSec : 0f;
+            ShieldDrainPerSec = shieldDrainPerSec > 0f ? shieldDrainPerSec : 0f;
+            WeaponDrainPerShot = weaponDrainPerShot > 0f ? weaponDrainPerShot : 0f;
+            RestartFraction = restartFraction > 0f && restartFraction < 1f ? restartFraction : 0.2f;
+        }
+
+        /// <summary>缺省值：只在配置缺失时使用（假实现、单元测试、旧调用点）。</summary>
+        public static PowerProfile Default =>
+            new PowerProfile(120f, 3.4f, 2.2f, 0.8f, 1.2f, 5f, 0.2f);
+    }
+
+    /// <summary>
     /// 战斗开始输入。只含解析后的数据，不含对战略模块的反向引用。
     /// 必须自包含：任务 ID 与星系锚点都在 spec 里，结算不依赖门面当时的当前任务。
     /// </summary>
@@ -168,6 +211,8 @@ namespace StarPawn.Combat.Contracts
         public readonly ManeuverProfile Maneuver;
         /// <summary>散布角上限（度）。精度 1 时无散布，精度 0 时达到该上限。</summary>
         public readonly float MaxSpreadDeg;
+        /// <summary>能源参数：容量、再生与各路耗电率。</summary>
+        public readonly PowerProfile Power;
 
         /// <summary>
         /// 配置缺省散布上限（度）。标定依据：在 60% 射程上，落点散布半径约等于 1.4 倍舰体半径，
@@ -183,15 +228,26 @@ namespace StarPawn.Combat.Contracts
             : this(maxHull, maxSpeedKps, turnRateDps, gunDamage, gunRangeKm, shellVelocityKps,
                    reloadSeconds, shieldCapacity, shieldRegenPerSec, accuracy01,
                    HullRadiusKmFromHull(maxHull), ManeuverProfile.Derive(maxSpeedKps, turnRateDps),
-                   DefaultMaxSpreadDeg)
+                   DefaultMaxSpreadDeg, PowerProfile.Default)
         {
         }
 
-        /// <summary>完整构造：真实配置走这条，机动与半径都显式给出。</summary>
+        /// <summary>完整构造：真实配置走这条，机动与半径都显式给出，能源走缺省。</summary>
         public ResolvedShipStats(float maxHull, float maxSpeedKps, float turnRateDps,
             float gunDamage, float gunRangeKm, float shellVelocityKps, float reloadSeconds,
             float shieldCapacity, float shieldRegenPerSec, float accuracy01,
             float hullRadiusKm, ManeuverProfile maneuver, float maxSpreadDeg)
+            : this(maxHull, maxSpeedKps, turnRateDps, gunDamage, gunRangeKm, shellVelocityKps,
+                   reloadSeconds, shieldCapacity, shieldRegenPerSec, accuracy01,
+                   hullRadiusKm, maneuver, maxSpreadDeg, PowerProfile.Default)
+        {
+        }
+
+        /// <summary>全参构造：连能源一起给出。舰级差异体现在每一个字段上。</summary>
+        public ResolvedShipStats(float maxHull, float maxSpeedKps, float turnRateDps,
+            float gunDamage, float gunRangeKm, float shellVelocityKps, float reloadSeconds,
+            float shieldCapacity, float shieldRegenPerSec, float accuracy01,
+            float hullRadiusKm, ManeuverProfile maneuver, float maxSpreadDeg, PowerProfile power)
         {
             MaxHull = maxHull; MaxSpeedKps = maxSpeedKps; TurnRateDps = turnRateDps;
             GunDamage = gunDamage; GunRangeKm = gunRangeKm; ShellVelocityKps = shellVelocityKps;
@@ -199,6 +255,7 @@ namespace StarPawn.Combat.Contracts
             ShieldRegenPerSec = shieldRegenPerSec; Accuracy01 = accuracy01;
             HullRadiusKm = hullRadiusKm; Maneuver = maneuver;
             MaxSpreadDeg = maxSpreadDeg > 0f ? maxSpreadDeg : DefaultMaxSpreadDeg;
+            Power = power;
         }
 
         /// <summary>缺省半径：0.04 × cbrt(MaxHull) → 120/300/800 血对应 0.20/0.27/0.37 km。</summary>
@@ -286,6 +343,16 @@ namespace StarPawn.Combat.Contracts
         public float WorldZ;
     }
 
+    /// <summary>
+    /// 锁定目标。锁定后由仿真每 tick 用相对速度解提前量、写回快照的 AimPoint，
+    /// 玩家不必自己算提前量；目标死亡或超出锁定距离会自动解除。
+    /// TargetId 留空表示主动解除锁定。
+    /// </summary>
+    public sealed class LockTargetCommand : CombatCommand
+    {
+        public EntityId TargetId;
+    }
+
     public sealed class FireCommand : CombatCommand { }
 
     public sealed class SquadCommand : CombatCommand
@@ -343,7 +410,19 @@ namespace StarPawn.Combat.Contracts
         public bool IsAlive;
         public float Reload01;
         public float Shield01;
+        /// <summary>本舰当前的能量三路分配预设。能源是每舰一份，不是全队共用。</summary>
         public PowerPreset PowerMode;
+        /// <summary>剩余能源比例 0..1。HUD 的能源条读它。</summary>
+        public float Energy01;
+        /// <summary>能源耗尽导致推进被锁（推力档位已被强制归零）。</summary>
+        public bool PropulsionLocked;
+        /// <summary>当前锁定目标；为空表示未锁定。</summary>
+        public EntityId LockedTargetId;
+        /// <summary>仿真为本舰解算出的开火瞄准点（含提前量）。HUD 画提前量准星读它。</summary>
+        public float AimX;
+        public float AimY;
+        public float AimZ;
+        public bool HasAim;
     }
 
     public sealed class ProjectileSnapshot
@@ -379,6 +458,11 @@ namespace StarPawn.Combat.Contracts
         public const float MaxThrust = 1f;
         /// <summary>炮的射界锥半角（度）。瞄准点出锥时钳到锥边。</summary>
         public const float GunArcHalfAngleDeg = 15f;
+        /// <summary>
+        /// 锁定距离 = 炮的射程 × 该系数。留一点余量，让玩家能在进入射程前先锁定、
+        /// 观察提前量准星；再远锁定也没有意义（打不到）。
+        /// </summary>
+        public const float LockRangeFactor = 1.2f;
 
         public static CommandResult ValidateSpec(BattleStartSpec spec)
         {
@@ -422,6 +506,7 @@ namespace StarPawn.Combat.Contracts
                 if (m.Rate(axis) <= 0f) return CommandResult.Fail("BAD_STATS", "转速上限必须为正: " + axis);
                 if (m.Accel(axis) <= 0f) return CommandResult.Fail("BAD_STATS", "角加速度必须为正: " + axis);
             }
+            if (stats.Power.Capacity <= 0f) return CommandResult.Fail("BAD_STATS", "能源容量必须为正");
             return CommandResult.Ok();
         }
 
@@ -435,6 +520,7 @@ namespace StarPawn.Combat.Contracts
         public static CommandResult ValidatePower(PowerAllocationCommand cmd)
         {
             if (cmd == null) return CommandResult.Fail("NULL_COMMAND", "能量命令为空");
+            if (cmd.ShipId.IsEmpty) return CommandResult.Fail("BAD_SHIP_ID", "能量命令缺少舰船 ID");
             if (cmd.Propulsion < 0f || cmd.Shield < 0f || cmd.Weapons < 0f)
                 return CommandResult.Fail("INVALID_POWER", "三路能量比例不能为负");
             float sum = cmd.Propulsion + cmd.Shield + cmd.Weapons;

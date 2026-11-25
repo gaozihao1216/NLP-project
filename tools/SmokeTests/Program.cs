@@ -256,6 +256,139 @@ internal static class Program
             Check("战斗结果数组深拷贝", second.DestroyedEnemyIds[0] != new EntityId("tampered"));
         }
 
+        // 15. 三维姿态与扫掠碰撞的数学基元
+        {
+            var q = StarPawn.Combat.Domain.Quat.FromEulerDeg(37f, -21f, 64f);
+            float yaw, pitch, roll;
+            q.ToEulerDeg(out yaw, out pitch, out roll);
+            Check("四元数欧拉往返",
+                Math.Abs(yaw - 37f) < 0.01f && Math.Abs(pitch + 21f) < 0.01f && Math.Abs(roll - 64f) < 0.01f,
+                "yaw=" + yaw.ToString("0.00") + " pitch=" + pitch.ToString("0.00") + " roll=" + roll.ToString("0.00"));
+
+            Vec3 fwd = StarPawn.Combat.Domain.Quat.FromEulerDeg(90f, 0f, 0f).Forward;
+            Check("偏航 90° 后舰首指向 +X",
+                Math.Abs(fwd.X - 1f) < 0.001f && Math.Abs(fwd.Z) < 0.001f, fwd.ToString());
+
+            // 弹速 7 km/tick 的情形：起止点都在球外，但线段穿过 → 必须判命中
+            float t;
+            bool through = StarPawn.Combat.Domain.Systems.DamageSystem.SegmentSphere(
+                new Vec3(0f, 0f, -5f), new Vec3(0f, 0f, 5f), 0.3f, out t);
+            Check("扫掠碰撞：高速穿过也命中", through);
+
+            bool graze = StarPawn.Combat.Domain.Systems.DamageSystem.SegmentSphere(
+                new Vec3(0.5f, 0f, -5f), new Vec3(0.5f, 0f, 5f), 0.3f, out t);
+            Check("扫掠碰撞：擦过不误判", !graze);
+        }
+
+        // 16. 反喷回正：线性减速到 0，不阶跃、不反向过冲
+        {
+            float omega = 45f;
+            float prev = omega;
+            bool monotonic = true;
+            bool overshoot = false;
+            int ticks = 0;
+            while (omega != 0f && ticks < 300)
+            {
+                omega = StarPawn.Combat.Domain.Systems.MovementSystem.StepAxis(
+                    omega, 0f, 45f, 180f, true, 1f / 30f);
+                if (Math.Abs(omega) > Math.Abs(prev)) monotonic = false;
+                if (omega * prev < 0f) overshoot = true;
+                prev = omega;
+                ticks++;
+            }
+            Check("松键后角速度减到 0", omega == 0f, "ticks=" + ticks);
+            Check("回正过程单调、无反向过冲", monotonic && !overshoot, "ticks=" + ticks + " monotonic=" + monotonic);
+            Check("回正耗时约 0.25 s", ticks >= 7 && ticks <= 9, "ticks=" + ticks);
+
+            // 关掉飞控 = 纯牛顿：角速度必须保持
+            float kept = 45f;
+            for (int i = 0; i < 60; i++)
+                kept = StarPawn.Combat.Domain.Systems.MovementSystem.StepAxis(
+                    kept, 0f, 45f, 180f, false, 1f / 30f);
+            Check("关飞控后角速度保持（纯牛顿）", Math.Abs(kept - 45f) < 0.001f, "omega=" + kept);
+        }
+
+        // 17. 提前量必须用相对速度：射手自己也在动
+        {
+            var shooterPos = new Vec3(0f, 0f, 0f);
+            var shooterVel = new Vec3(0f, 0f, 32f);
+            var targetPos = new Vec3(100f, 0f, 150f);
+            var targetVel = new Vec3(-32f, 0f, 0f);
+            Vec3 aim;
+            bool ok = CombatMath.TryLeadPoint(shooterPos, shooterVel, targetPos, targetVel, 220f, out aim);
+            Check("提前量可解", ok);
+
+            // 按瞄准方向发射，让炮弹自己飞，检查是否与目标相遇
+            Vec3 dir = (aim - shooterPos).Normalized;
+            Vec3 shellVel = shooterVel + dir * 220f;
+            float bestMiss = float.MaxValue;
+            for (int i = 1; i <= 60; i++)
+            {
+                float time = i * 0.05f;
+                Vec3 shellAt = shooterPos + shellVel * time;
+                Vec3 targetAt = targetPos + targetVel * time;
+                float miss = (shellAt - targetAt).Length;
+                if (miss < bestMiss) bestMiss = miss;
+            }
+            Check("炮弹与移动目标相遇（误差 < 1 km）", bestMiss < 1f, "最小偏差 " + bestMiss.ToString("0.000") + " km");
+        }
+
+        // 18. 真实战斗仿真能推进、能开火、能造成伤害
+        {
+            var spec = new BattleStartSpec
+            {
+                BattleId = new EntityId("battle.smoke"),
+                MissionId = "mission.smoke",
+                OriginSystemId = new EntityId("sys.kaila"),
+                TargetSystemId = new EntityId("sys.kaila"),
+                Allies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("ally.cruiser"), DefinitionId = new ContentId("ship.g_cruiser"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Flagship, SquadIndex = 0,
+                        Spawn = new SpawnPoint(0f, 0f, 0f, 0f, 0f, 0f),
+                        Stats = new ResolvedShipStats(800f, 20f, 20f, 100f, 320f, 300f, 6f, 300f, 8f, 0.92f,
+                            0.37f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f),
+                        InheritedHull01 = 1f
+                    }
+                },
+                Enemies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("enemy.patrol"), DefinitionId = new ContentId("ship.a_patrol"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Escort, SquadIndex = 1,
+                        Spawn = new SpawnPoint(0f, 0f, 120f, 180f, 0f, 0f),
+                        Stats = new ResolvedShipStats(120f, 32f, 45f, 20f, 180f, 220f, 3.2f, 80f, 3f, 0.85f,
+                            0.20f, new ManeuverProfile(4.0f, 45f, 27f, 81f, 180f, 108f, 324f), 1f),
+                        InheritedHull01 = 1f
+                    }
+                },
+                BattlefieldLayout = "open_space",
+                Objective = new BattleObjective { Kind = "DestroyAll", TimeLimitSeconds = 300f },
+                RandomSeed = 7,
+                FixedStep = 1f / 30f
+            };
+
+            var rt = new StarPawn.Combat.Domain.CombatRuntime();
+            rt.Initialize(spec);
+            bool sawFire = false;
+            for (int i = 0; i < 600; i++)
+            {
+                rt.Step();
+                foreach (var e in rt.DrainEvents())
+                    if (e.Kind == "Fire") sawFire = true;
+            }
+            var snap = rt.ReadSnapshot();
+            bool closedIn = snap.Ships[1].Z < 119f;
+            bool hurt = snap.Ships[0].Shield01 < 1f || snap.Ships[0].Health01 < 1f;
+            Check("真实战斗：敌舰开火", sawFire);
+            Check("真实战斗：敌舰主动接近", closedIn, "z=" + snap.Ships[1].Z.ToString("0.0"));
+            Check("真实战斗：命中造成掉血", hurt,
+                "shield=" + snap.Ships[0].Shield01.ToString("0.00") + " hull=" + snap.Ships[0].Health01.ToString("0.00"));
+        }
+
         Console.WriteLine($"\n=== 结果：{_passed} 通过，{_failed} 失败 ===");
         Environment.Exit(_failed == 0 ? 0 : 1);
     }

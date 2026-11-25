@@ -32,7 +32,7 @@ namespace StarPawn.Bootstrap
                 Progression = new FakeProgressionService(),
                 Relations = new FakeRelationsService(),
                 Narrative = new FakeNarrativeRuntime(),
-                Combat = new FakeCombatRuntime(),
+                Combat = new CombatRuntime(),
                 Advisor = new RuleBasedOfficer(),
                 TacticalHints = new RuleBasedOfficer() as StarPawn.Officer.Contracts.ITacticalHintProvider,
                 Rewards = string.IsNullOrEmpty(contentRoot) ? null : new JsonMissionRewardSource(contentRoot)

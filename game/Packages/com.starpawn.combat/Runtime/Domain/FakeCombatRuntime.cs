@@ -58,7 +58,8 @@ namespace StarPawn.Combat.Domain
             return new ShipSnapshot
             {
                 ShipId = e.ShipId, DefinitionId = e.DefinitionId, IsAlly = ally, Role = e.Role,
-                X = e.Spawn.X, Y = e.Spawn.Y, Heading = e.Spawn.Heading,
+                X = e.Spawn.X, Y = e.Spawn.Y, Z = e.Spawn.Z,
+                Yaw = e.Spawn.Yaw, Pitch = e.Spawn.Pitch, Roll = e.Spawn.Roll,
                 Speed = 0f, Health01 = e.InheritedHull01, IsAlive = true, Reload01 = 1f,
                 Shield01 = 1f, PowerMode = PowerPreset.Balanced
             };
@@ -77,6 +78,7 @@ namespace StarPawn.Combat.Domain
                     ObstacleId = new EntityId("obs." + spec.BattleId.ToString() + "." + i),
                     X = 120f + _rng.NextFloat() * 180f,
                     Y = -90f + _rng.NextFloat() * 180f,
+                    Z = -90f + _rng.NextFloat() * 180f,
                     RadiusKm = 4f + _rng.NextFloat() * 8f,
                     Health01 = 1f,
                     IsAlive = true
@@ -90,9 +92,11 @@ namespace StarPawn.Combat.Domain
             if (!_started) return CommandResult.Fail("NOT_INITIALIZED", "战斗未初始化");
             if (command is HelmCommand helm)
             {
+                var check = BattleRules.ValidateHelm(helm);
+                if (!check.Success) return check;
                 foreach (var s in _snapshot.Ships)
                     if (s.ShipId == command.ShipId)
-                    { s.Speed = helm.Throttle; s.Heading += helm.Rudder; }
+                    { s.Speed = helm.Thrust; s.Yaw += helm.Yaw; }
                 return CommandResult.Ok();
             }
             if (command is PowerAllocationCommand power)
@@ -178,7 +182,10 @@ namespace StarPawn.Combat.Domain
                 ships[i] = new ShipSnapshot
                 {
                     ShipId = s.ShipId, DefinitionId = s.DefinitionId, IsAlly = s.IsAlly, Role = s.Role,
-                    X = s.X, Y = s.Y, Heading = s.Heading, Speed = s.Speed,
+                    X = s.X, Y = s.Y, Z = s.Z,
+                    Yaw = s.Yaw, Pitch = s.Pitch, Roll = s.Roll,
+                    Vx = s.Vx, Vy = s.Vy, Vz = s.Vz, Speed = s.Speed,
+                    PitchRate = s.PitchRate, YawRate = s.YawRate, RollRate = s.RollRate,
                     Health01 = s.Health01, IsAlive = s.IsAlive, Reload01 = s.Reload01,
                     Shield01 = s.Shield01, PowerMode = s.PowerMode
                 };
@@ -187,13 +194,14 @@ namespace StarPawn.Combat.Domain
             for (int i = 0; i < proj.Length; i++)
                 proj[i] = new ProjectileSnapshot
                 { ProjectileId = _snapshot.Projectiles[i].ProjectileId,
-                  X = _snapshot.Projectiles[i].X, Y = _snapshot.Projectiles[i].Y };
+                  X = _snapshot.Projectiles[i].X, Y = _snapshot.Projectiles[i].Y,
+                  Z = _snapshot.Projectiles[i].Z };
             var obs = new ObstacleSnapshot[_snapshot.Obstacles.Length];
             for (int i = 0; i < obs.Length; i++)
             {
                 var o = _snapshot.Obstacles[i];
                 obs[i] = new ObstacleSnapshot
-                { ObstacleId = o.ObstacleId, X = o.X, Y = o.Y, RadiusKm = o.RadiusKm,
+                { ObstacleId = o.ObstacleId, X = o.X, Y = o.Y, Z = o.Z, RadiusKm = o.RadiusKm,
                   Health01 = o.Health01, IsAlive = o.IsAlive };
             }
             return new BattleSnapshot

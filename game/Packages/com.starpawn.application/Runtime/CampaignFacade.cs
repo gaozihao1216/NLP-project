@@ -152,13 +152,15 @@ namespace StarPawn.Application
             foreach (var ship in fleet.Ships)
             {
                 if (!ship.IsInFleet || !_s.Fleet.IsLaunchable(ship.ShipId)) continue;
-                float heading = i * 45f;
+                // 三维出场：全队朝 +Z 列阵，横向按序错开。二维时代的「各自偏转 heading」在 3D 里
+                // 会让舰首指向上级方向，已改为统一朝敌。
+                float lateral = i * 30f - 15f;
                 allies.Add(new FleetEntry
                 {
                     ShipId = ship.ShipId, DefinitionId = ship.DefinitionId,
                     Role = ToCombatRole(ship.AssignedRole),
                     SquadIndex = ToSquadIndex(ship.AssignedRole),
-                    Spawn = new SpawnPoint(i * 30f, 0f, heading),
+                    Spawn = new SpawnPoint(lateral, 0f, 0f, 0f, 0f, 0f),
                     Stats = ResolveStats(ship),
                     InheritedHull01 = ship.HullIntegrity01
                 });
@@ -171,7 +173,8 @@ namespace StarPawn.Application
                     ShipId = enemyShipIds[j], DefinitionId = new ContentId("ship.a_patrol"),
                     Role = CombatSquadRole.Escort,
                     SquadIndex = j % BattleRules.MaxSquads,
-                    Spawn = new SpawnPoint(300f + j * 25f, 120f, 180f),
+                    // 敌舰摆在 +Z 前方 260 km、横向散开，正面朝向玩家；不再用旧的 (300,120) 斜上方点位。
+                    Spawn = new SpawnPoint(-60f + j * 60f, 0f, 260f, 180f, 0f, 0f),
                     Stats = ResolvedShipStats.Default,
                     InheritedHull01 = 1f
                 });
@@ -207,8 +210,17 @@ namespace StarPawn.Application
             }
         }
 
+        // 机动参数的临时数值同步：与 content/ships 的 combat.maneuver 保持一致。
+        // 真正的配置加载器是 B 的第二周任务，落地后这两行与本方法一起删掉。
+        private static readonly ManeuverProfile CruiserManeuver =
+            new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f);
+
+        private static readonly ManeuverProfile CorvetteManeuver =
+            new ManeuverProfile(4.0f, 45f, 27f, 81f, 180f, 108f, 324f);
+
         /// <summary>
         /// 由持久状态解析战斗属性。当前用固定基线，接内容加载后从 content/ships/ 读并按立方律换算。
+        /// 半径与机动参数必须显式给：它们决定舰级手感，不能靠血量或转速反推。
         /// </summary>
         private static ResolvedShipStats ResolveStats(OwnedShipState ship)
         {
@@ -223,7 +235,10 @@ namespace StarPawn.Application
                 reloadSeconds: flagship ? 6f : 3.2f,
                 shieldCapacity: flagship ? 300f : 80f,
                 shieldRegenPerSec: flagship ? 8f : 3f,
-                accuracy01: flagship ? 0.92f : 0.85f);
+                accuracy01: flagship ? 0.92f : 0.85f,
+                hullRadiusKm: flagship ? 0.37f : 0.20f,
+                maneuver: flagship ? CruiserManeuver : CorvetteManeuver,
+                maxSpreadDeg: ResolvedShipStats.DefaultMaxSpreadDeg);
         }
 
         // ---- 战斗会话控制：表现层只通过门面推进，不直接持有 Combat ----

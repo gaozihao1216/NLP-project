@@ -6,6 +6,17 @@
   "combat": {
     "maxSpeed": 20,
     "turnRate": 20,
+    "hullRadiusKm": 0.37,
+    "maneuver": {
+      "maxThrustKmS2": 2.5,
+      "yawRateDps": 20,
+      "pitchRateDps": 12,
+      "rollRateDps": 36,
+      "yawAccelDps2": 80,
+      "pitchAccelDps2": 48,
+      "rollAccelDps2": 144
+    },
+    "maxSpreadDeg": 1.0,
     "gunRange": 320,
     "shellVelocity": 300,
     "reloadSeconds": 6.0,

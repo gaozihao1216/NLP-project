@@ -9,6 +9,18 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/FakeCombatRuntime.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Quat.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/CombatShip.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Projectile.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Obstacle.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/CombatWorld.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/CombatRuntime.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/MovementSystem.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/WeaponSystem.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/ProjectileSystem.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/DamageSystem.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/ObjectiveSystem.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/SimpleEnemyController.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Combat_Contracts.csproj" />

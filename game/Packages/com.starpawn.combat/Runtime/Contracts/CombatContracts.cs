@@ -307,6 +307,61 @@ namespace StarPawn.Combat.Contracts
     /// 已解析的战斗属性。由内容定义在进入战斗前算好，Combat 不查内容库、不认识 ContentId 的含义。
     /// 字段不可变，避免不同舰共用同一份属性对象时被互相改写。
     /// </summary>
+    /// <summary>
+    /// 一个炮座。装填、装药、射界**每座独立**：四门炮不会因为一门开火就一起等 CD。
+    ///
+    /// 不建模炮塔转向速度——这是有意的。数十门炮各带转速会让「能不能打」取决于一个玩家读不出来的
+    /// 中间量；本作只判断两件事：**装填好了没**、**目标在不在射界里**。转向交给舰体。
+    ///
+    /// 朝向用「中心角 + 半张角」而不是 min/max，是为了避开 180° 处的回绕：
+    /// 舰尾炮写 center=180 / half=140 就是 40..320，不需要任何跨零特判。
+    /// </summary>
+    public sealed class TurretProfile
+    {
+        /// <summary>"bow.l" / "stern" 之类，只用于事件与调试，不参与运算。</summary>
+        public readonly string Id;
+        /// <summary>炮座在舰体坐标里的位置（km）：x 右、y 上、z 舰首。</summary>
+        public readonly float MountRightKm;
+        public readonly float MountUpKm;
+        public readonly float MountForwardKm;
+        /// <summary>射界方位中心，相对舰首，右为正。</summary>
+        public readonly float YawCenterDeg;
+        /// <summary>射界半张角 0..180。140 表示「左右各 140°，打不到自己舰体」。</summary>
+        public readonly float YawHalfArcDeg;
+        /// <summary>俯仰上下限（度），抬头为正。</summary>
+        public readonly float PitchMinDeg;
+        public readonly float PitchMaxDeg;
+        public readonly float ReloadSeconds;
+        public readonly float Damage;
+        public readonly float ShellVelocityKps;
+        public readonly float MaxRangeKm;
+        public readonly DamageChannel Channel;
+
+        public TurretProfile(string id,
+            float mountRightKm, float mountUpKm, float mountForwardKm,
+            float yawCenterDeg, float yawHalfArcDeg, float pitchMinDeg, float pitchMaxDeg,
+            float reloadSeconds, float damage, float shellVelocityKps, float maxRangeKm,
+            DamageChannel channel)
+        {
+            Id = string.IsNullOrEmpty(id) ? "gun" : id;
+            MountRightKm = mountRightKm;
+            MountUpKm = mountUpKm;
+            MountForwardKm = mountForwardKm;
+            YawCenterDeg = yawCenterDeg;
+            YawHalfArcDeg = yawHalfArcDeg < 0f ? 0f : (yawHalfArcDeg > 180f ? 180f : yawHalfArcDeg);
+            PitchMinDeg = pitchMinDeg;
+            PitchMaxDeg = pitchMaxDeg < pitchMinDeg ? pitchMinDeg : pitchMaxDeg;
+            ReloadSeconds = reloadSeconds > 0f ? reloadSeconds : 0.01f;
+            Damage = damage < 0f ? 0f : damage;
+            ShellVelocityKps = shellVelocityKps > 0f ? shellVelocityKps : 0.01f;
+            MaxRangeKm = maxRangeKm > 0f ? maxRangeKm : 0.01f;
+            Channel = channel;
+        }
+
+        /// <summary>炮座位置（舰体坐标）。</summary>
+        public Vec3 MountLocal => new Vec3(MountRightKm, MountUpKm, MountForwardKm);
+    }
+
     public sealed class ResolvedShipStats
     {
         public readonly float MaxHull;
@@ -333,6 +388,13 @@ namespace StarPawn.Combat.Contracts
         public readonly ShieldProfile Shield;
         /// <summary>过载缓冲池与破盾失效。</summary>
         public readonly OverloadProfile Overload;
+
+        /// <summary>
+        /// 炮座表，**武器参数的唯一真源**：射程/装药/装填/弹速都按座给。
+        /// 上面的 GunDamage / GunRangeKm / ShellVelocityKps / ReloadSeconds 只是对外汇总口径
+        /// （最大射程、最大单发、最快装填），给 AI 站位、HUD 与旧调用点用，不参与结算。
+        /// </summary>
+        public readonly TurretProfile[] Turrets;
 
         /// <summary>
         /// 配置缺省散布上限（度）。标定依据：在 60% 射程上，落点散布半径约等于 1.4 倍舰体半径，
@@ -382,7 +444,8 @@ namespace StarPawn.Combat.Contracts
             float gunDamage, float gunRangeKm, float shellVelocityKps, float reloadSeconds,
             float shieldCapacity, float shieldRegenPerSec, float accuracy01,
             float hullRadiusKm, ManeuverProfile maneuver, float maxSpreadDeg, PowerProfile power,
-            ArmorProfile armor, ShieldProfile shield, OverloadProfile overload)
+            ArmorProfile armor, ShieldProfile shield, OverloadProfile overload,
+            TurretProfile[] turrets = null)
         {
             MaxHull = maxHull; MaxSpeedKps = maxSpeedKps; TurnRateDps = turnRateDps;
             GunDamage = gunDamage; GunRangeKm = gunRangeKm; ShellVelocityKps = shellVelocityKps;
@@ -390,6 +453,16 @@ namespace StarPawn.Combat.Contracts
             HullRadiusKm = hullRadiusKm; Maneuver = maneuver;
             MaxSpreadDeg = maxSpreadDeg > 0f ? maxSpreadDeg : DefaultMaxSpreadDeg;
             Power = power; Armor = armor; Shield = shield; Overload = overload;
+
+            // 没给炮座表 = 旧的单炮舰：一门全向炮，参数取舰体标量。行为与炮塔化之前一致，
+            // 差别只在于旧代码把出界方向钳到 ±15° 锥边再开火，现在做的是「射界外就不打」。
+            Turrets = turrets != null && turrets.Length > 0
+                ? turrets
+                : new[]
+                {
+                    new TurretProfile("gun", 0f, 0f, 0f, 0f, 180f, -90f, 90f,
+                        reloadSeconds, gunDamage, shellVelocityKps, gunRangeKm, DamageChannel.Kinetic)
+                };
         }
 
         /// <summary>缺省半径：0.04 × cbrt(MaxHull) → 120/300/800 血对应 0.20/0.27/0.37 km。</summary>
@@ -552,6 +625,12 @@ namespace StarPawn.Combat.Contracts
         public float Health01;
         public bool IsAlive;
         public float Reload01;
+        /// <summary>炮座总数。HUD 的「X/Y 就位」右边那个 Y。</summary>
+        public int TurretCount;
+        /// <summary>已装填完的炮座数。</summary>
+        public int TurretsLoaded;
+        /// <summary>既装填完、目标又落在射界内的炮座数。按开火能打出去的只有这几门。</summary>
+        public int TurretsInArc;
         /// <summary>过载缓冲池余量 0..1。护盾的「厚度」是三面 DR，不是这条进度条。</summary>
         public float Buffer01;
         /// <summary>护盾是否处于破盾失效（DR = 0、缓冲池锁定 0），失效期结束会自动恢复三成。</summary>
@@ -606,8 +685,8 @@ namespace StarPawn.Combat.Contracts
         /// <summary>推力档位下限（反推）与上限（全速）。</summary>
         public const float MinThrust = -0.5f;
         public const float MaxThrust = 1f;
-        /// <summary>炮的射界锥半角（度）。瞄准点出锥时钳到锥边。</summary>
-        public const float GunArcHalfAngleDeg = 15f;
+        // 旧的全舰统一射界（±15°）已删除：射界现在是**每个炮座**自己的属性
+        // （TurretProfile.YawCenterDeg / YawHalfArcDeg），舰首炮与舰尾炮本来就该不一样。
         /// <summary>
         /// 锁定距离 = 炮的射程 × 该系数。留一点余量，让玩家能在进入射程前先锁定、
         /// 观察提前量准星；再远锁定也没有意义（打不到）。

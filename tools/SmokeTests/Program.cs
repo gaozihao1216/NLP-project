@@ -173,6 +173,31 @@ internal static class Program
         Num("bufferCapacity", a.Overload.BufferCapacity, b.Overload.BufferCapacity);
         Num("breakSeconds", a.Overload.BreakSeconds, b.Overload.BreakSeconds);
 
+        // 炮座表必须逐座比：镜像漏改一门炮的射界或伤害，战斗里只会表现为「某一边偶尔打不出弹」，
+        // 光看总伤害是发现不了的。
+        int ta = a.Turrets != null ? a.Turrets.Length : 0;
+        int tb = b.Turrets != null ? b.Turrets.Length : 0;
+        if (ta != tb) d.Add("炮座数 " + ta + "≠" + tb);
+        for (int i = 0; i < ta && i < tb; i++)
+        {
+            var x = a.Turrets[i];
+            var y = b.Turrets[i];
+            string p = "turret[" + i + "]";
+            if (x.Id != y.Id) d.Add(p + ".id " + x.Id + "≠" + y.Id);
+            Num(p + ".right", x.MountRightKm, y.MountRightKm);
+            Num(p + ".up", x.MountUpKm, y.MountUpKm);
+            Num(p + ".fwd", x.MountForwardKm, y.MountForwardKm);
+            Num(p + ".yawCenter", x.YawCenterDeg, y.YawCenterDeg);
+            Num(p + ".yawHalfArc", x.YawHalfArcDeg, y.YawHalfArcDeg);
+            Num(p + ".pitchMin", x.PitchMinDeg, y.PitchMinDeg);
+            Num(p + ".pitchMax", x.PitchMaxDeg, y.PitchMaxDeg);
+            Num(p + ".reload", x.ReloadSeconds, y.ReloadSeconds);
+            Num(p + ".damage", x.Damage, y.Damage);
+            Num(p + ".velocity", x.ShellVelocityKps, y.ShellVelocityKps);
+            Num(p + ".range", x.MaxRangeKm, y.MaxRangeKm);
+            if (x.Channel != y.Channel) d.Add(p + ".channel " + x.Channel + "≠" + y.Channel);
+        }
+
         return d.Count == 0 ? null : string.Join(", ", d);
     }
 
@@ -1186,6 +1211,134 @@ internal static class Program
                     !ok && string.Join("; ", errs).Contains("overload.threshold"), string.Join("; ", errs));
             }
         }
+
+        // 33. 炮塔化：每座独立装填、各自判射界、齐射总伤守恒
+        {
+            ResolvedShipStats cruiser;
+            bool gotCruiser = ShipCatalog.Builtin.TryGet("ship.g_cruiser", out cruiser);
+            Check("巡洋舰炮座表进得来（4 座）",
+                gotCruiser && cruiser.Turrets.Length == 4,
+                gotCruiser ? "turrets=" + cruiser.Turrets.Length : "no stats");
+
+            float salvo = 0f;
+            for (int i = 0; i < cruiser.Turrets.Length; i++) salvo += cruiser.Turrets[i].Damage;
+            Check("齐射总伤守恒（4×25 = 舰体 100）", Math.Abs(salvo - cruiser.GunDamage) < 1e-3f,
+                "salvo=" + salvo.ToString("0.0") + " gunDamage=" + cruiser.GunDamage.ToString("0.0"));
+
+            CombatWorld MakeGunner(out CombatShip ship)
+            {
+                var w = ShieldWorld();
+                ship = new CombatShip
+                {
+                    Id = new EntityId("gunner"),
+                    Stats = cruiser,
+                    Pos = Vec3.Zero,
+                    Attitude = Quat.Identity,
+                    Hull = cruiser.MaxHull,
+                    Energy = cruiser.Power.Capacity,
+                    LastHitTime = -999f
+                };
+                ship.ResetTurrets();
+                w.Ships.Add(ship);
+                return w;
+            }
+
+            void AdvanceGuns(CombatWorld w, float seconds)
+            {
+                int ticks = (int)Math.Round(seconds / w.Clock.FixedStep);
+                for (int i = 0; i < ticks; i++) WeaponSystem.Step(w, w.Clock.FixedStep);
+            }
+
+            // (a) 正侧方：四门都能压过来，一次开火命令打出四发（这才是「齐射」）
+            {
+                var w = MakeGunner(out var s);
+                s.AimPoint = new Vec3(100f, 0f, 0f);
+                s.HasAim = true;
+                WeaponSystem.Step(w, w.Clock.FixedStep);      // 只为统计就位数
+                Check("正侧方：四座全部就位（4/4）",
+                    s.TurretsLoaded == 4 && s.TurretsInArc == 4,
+                    s.TurretsInArc + "/" + s.TurretsLoaded);
+
+                s.FireRequested = true;
+                WeaponSystem.Step(w, w.Clock.FixedStep);
+                Check("一次开火命令 = 一次齐射（4 发）", w.Shells.Count == 4, "shells=" + w.Shells.Count);
+                Check("四门炮各自进装填", s.TurretsLoaded == 0, "loaded=" + s.TurretsLoaded);
+
+                AdvanceGuns(w, 8f);   // 6 s × 交战档系数 1.128 ≈ 6.8 s
+                Check("装填完成四门一起回来（不共用一个 CD）", s.TurretsLoaded == 4,
+                    "loaded=" + s.TurretsLoaded);
+            }
+
+            // (b) 正前方：舰尾炮插不上手，两门舰首炮开火——这就是「打不到自己舰体」的判据
+            {
+                var w = MakeGunner(out var s);
+                s.AimPoint = new Vec3(0f, 0f, 100f);
+                s.HasAim = true;
+                WeaponSystem.Step(w, w.Clock.FixedStep);
+                Check("正前方：只有舰首两门就位（2/4）",
+                    s.TurretsLoaded == 4 && s.TurretsInArc == 2,
+                    s.TurretsInArc + "/" + s.TurretsLoaded);
+
+                s.FireRequested = true;
+                WeaponSystem.Step(w, w.Clock.FixedStep);
+                Check("舰尾炮不出弹，且只按两发扣电",
+                    w.Shells.Count == 2 &&
+                    Math.Abs(s.Energy - (cruiser.Power.Capacity - 2f * cruiser.Power.WeaponDrainPerShot)) < 1e-2f,
+                    "shells=" + w.Shells.Count + " energy=" + s.Energy.ToString("0.00"));
+                Check("被射界拦下的炮不进装填（也不会白扣电）",
+                    s.TurretReload[0] > 0f && s.TurretReload[1] > 0f &&
+                    s.TurretReload[2] == 0f && s.TurretReload[3] == 0f,
+                    "bow=" + s.TurretReload[0].ToString("0.00") + " stern=" + s.TurretReload[2].ToString("0.00"));
+            }
+
+            // (c) 正后方：反过来，只有两门舰尾炮能打
+            {
+                var w = MakeGunner(out var s);
+                s.AimPoint = new Vec3(0f, 0f, -100f);
+                s.HasAim = true;
+                WeaponSystem.Step(w, w.Clock.FixedStep);
+                Check("正后方：只有舰尾两门就位（2/4）",
+                    s.TurretsInArc == 2, s.TurretsInArc + "/4");
+
+                s.FireRequested = true;
+                WeaponSystem.Step(w, w.Clock.FixedStep);
+                Check("正后方开火 → 两发，舰首炮保持待发",
+                    w.Shells.Count == 2 && s.TurretReload[0] == 0f && s.TurretReload[2] > 0f,
+                    "shells=" + w.Shells.Count);
+            }
+
+            // (d) 解析器：炮座缺 yawCenter / channel 写错都必须报错并给出路径
+            string shipsDir = FindContentShipsDir();
+            if (shipsDir == null)
+            {
+                Check("找得到 content/ships（炮座用例）", false, "本机 cwd 不在仓库内");
+            }
+            else
+            {
+                string text = File.ReadAllText(Path.Combine(shipsDir, "g_cruiser.json"));
+                string id;
+                ResolvedShipStats st;
+                string[] errs;
+
+                bool ok = ShipConfigParser.TryParse(
+                    text.Replace("\"yawCenter\": 180", "\"yawCenterX\": 180"), out id, out st, out errs);
+                Check("炮座缺 yawCenter 报错并指到 turrets[2]",
+                    !ok && string.Join("; ", errs).Contains("turrets[2].yawCenter"),
+                    string.Join("; ", errs));
+
+                ok = ShipConfigParser.TryParse(
+                    text.Replace("\"yawHalfArc\": 140", "\"yawHalfArc\": 200"), out id, out st, out errs);
+                Check("yawHalfArc 超过 180 报错", !ok && string.Join("; ", errs).Contains("yawHalfArc"),
+                    string.Join("; ", errs));
+
+                ok = ShipConfigParser.TryParse(
+                    text.Replace("\"damage\": 25", "\"channel\": \"laser\""), out id, out st, out errs);
+                Check("channel 写错报错（不许静默当动能）",
+                    !ok && string.Join("; ", errs).Contains("channel"),
+                    string.Join("; ", errs));
+            }
+        }
+
 
         Console.WriteLine($"\n=== 结果：{_passed} 通过，{_failed} 失败 ===");
         Environment.Exit(_failed == 0 ? 0 : 1);

@@ -101,6 +101,17 @@ namespace StarPawn.Combat.Content
             return value != null;
         }
 
+        /// <summary>取数组。元素可能是 object（可能为 null），由调用方各自解释。</summary>
+        public static bool TryGetArray(object node, string key, out List<object> value)
+        {
+            value = null;
+            var obj = node as Dictionary<string, object>;
+            object child;
+            if (obj == null || !obj.TryGetValue(key, out child)) return false;
+            value = child as List<object>;
+            return value != null;
+        }
+
         private struct Parser
         {
             public string Text;

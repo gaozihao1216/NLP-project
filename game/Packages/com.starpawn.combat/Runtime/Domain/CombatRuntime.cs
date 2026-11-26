@@ -58,7 +58,8 @@ namespace StarPawn.Combat.Domain
                 Hull = e.Stats.MaxHull * e.InheritedHull01,
                 // 缓冲池开局是满的：护盾的「厚度」来自三面 DR，池只负责吸收饱和。
                 ShieldBuffer = e.Stats.Overload.BufferCapacity,
-                ReloadTimer = 0f,
+                // 炮座状态（长度、装填计时）按属性里的炮座表建；开局全部已装填。
+                TurretReload = new float[e.Stats.Turrets.Length],
                 // 能源每舰一份，全舰记账：护航舰与敌舰同样扣电、同样会熄火。
                 // 曾经为省算力只模拟主舰，但那样敌舰永远满推，压制结论不可信（T06）。
                 Power = PowerAllocation.Balanced,
@@ -284,6 +285,9 @@ namespace StarPawn.Combat.Domain
                     Health01 = s.Health01,
                     IsAlive = s.IsAlive,
                     Reload01 = s.Reload01,
+                    TurretCount = s.Stats.Turrets.Length,
+                    TurretsLoaded = s.TurretsLoaded,
+                    TurretsInArc = s.TurretsInArc,
                     Buffer01 = s.Buffer01,
                     ShieldBroken = s.ShieldBroken,
                     FaceDrFront = ShieldSystem.EffectiveDr(_w, s, ShieldFace.Front),

@@ -22,7 +22,7 @@
       "regenPerSecond": 3.2,
       "propulsionDrainPerSecond": 4.4,
       "turnDrainPerSecond": 0.9,
-      "weaponDrainPerShot": 7.0,
+      "weaponDrainPerShot": 1.75,
       "restartFraction": 0.18
     },
     "gunRange": 320,
@@ -30,6 +30,12 @@
     "reloadSeconds": 6.0,
     "gunDamage": 100,
     "accuracy": 0.92,
+    "turrets": [
+      { "id": "bow.l", "mount": { "right": 0.13, "up": 0.05, "forward": 0.27 }, "yawCenter": 0, "yawHalfArc": 140, "reloadSeconds": 6.0, "damage": 25 },
+      { "id": "bow.r", "mount": { "right": -0.13, "up": 0.05, "forward": 0.27 }, "yawCenter": 0, "yawHalfArc": 140, "reloadSeconds": 6.0, "damage": 25 },
+      { "id": "stern.l", "mount": { "right": 0.11, "up": 0.03, "forward": -0.27 }, "yawCenter": 180, "yawHalfArc": 140, "reloadSeconds": 6.0, "damage": 25 },
+      { "id": "stern.r", "mount": { "right": -0.11, "up": 0.03, "forward": -0.27 }, "yawCenter": 180, "yawHalfArc": 140, "reloadSeconds": 6.0, "damage": 25 }
+    ],
     "armor": { "beamDr": 0.20, "kineticDr": 0.35 },
     "shield": {
       "frontDr": 0.85,

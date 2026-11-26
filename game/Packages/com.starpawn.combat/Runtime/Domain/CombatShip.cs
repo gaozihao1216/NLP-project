@@ -104,12 +104,22 @@ namespace StarPawn.Combat.Domain
         public EntityId LockedTargetId;
         public bool HasLock => !LockedTargetId.IsEmpty;
 
-        // 武器
-        public float ReloadTimer;
+        // 武器：装填是**每座炮**独立的，所以这里是一个和 Stats.Turrets 等长的数组（0 = 已装填）。
+        // 一门炮打出去只让那一门进 CD，其余照常待发。
+        public float[] TurretReload;
+        /// <summary>本 tick 已装填完的炮座数（HUD 的「X/Y 就位」左边那个 X）。</summary>
+        public int TurretsLoaded;
+        /// <summary>既装填完、目标又落在射界内的炮座数。这才是「现在按开火能打出去几发」。</summary>
+        public int TurretsInArc;
         public Vec3 AimPoint;
         public bool HasAim;
         /// <summary>本 tick 是否请求开火，由 ApplyCommands 置位，WeaponSystem 消费后清掉。</summary>
         public bool FireRequested;
+        /// <summary>
+        /// 上一 tick 的「按了开火但一门都对不上」是否已经报过事件。
+        /// 不解这个：AI 每 tick 都会重提开火，事件流会被同一句 OutOfArc 刷屏。
+        /// </summary>
+        public bool FireRejected;
 
         public bool IsAlive => Hull > 0f;
         public float RadiusKm => Stats != null ? Stats.HullRadiusKm : 0f;
@@ -121,14 +131,33 @@ namespace StarPawn.Combat.Domain
             ? ShieldBuffer / Stats.Overload.BufferCapacity : 0f;
         public float Energy01 => Stats != null && Stats.Power.Capacity > 0f ? Energy / Stats.Power.Capacity : 0f;
         public float EnergyMax => Stats != null ? Stats.Power.Capacity : 0f;
+        /// <summary>
+        /// 装填进度 0..1，口径是「最快的那门炮」——HUD 只有一条装填条，
+        /// 让它显示「下一发什么时候能出去」比显示平均进度有用。
+        /// </summary>
         public float Reload01
         {
             get
             {
-                if (Stats == null || Stats.ReloadSeconds <= 0f) return 1f;
-                float v = 1f - ReloadTimer / Stats.ReloadSeconds;
-                return v < 0f ? 0f : (v > 1f ? 1f : v);
+                var ts = TurretReload;
+                if (Stats == null || ts == null || ts.Length == 0) return 1f;
+                var defs = Stats.Turrets;
+                float best = 0f;
+                for (int i = 0; i < ts.Length && i < defs.Length; i++)
+                {
+                    float p = 1f - ts[i] / defs[i].ReloadSeconds;
+                    if (p > best) best = p;
+                }
+                return best < 0f ? 0f : (best > 1f ? 1f : best);
             }
+        }
+
+        /// <summary>按当前属性重建炮座状态：开局全部装填完毕（0 = 可立刻开火）。</summary>
+        public void ResetTurrets()
+        {
+            TurretReload = new float[Stats != null && Stats.Turrets != null ? Stats.Turrets.Length : 0];
+            TurretsLoaded = TurretReload.Length;
+            TurretsInArc = 0;
         }
 
         /// <summary>结算后的完整度必须保留小数，不能把「擦伤」写成满血或击沉。</summary>

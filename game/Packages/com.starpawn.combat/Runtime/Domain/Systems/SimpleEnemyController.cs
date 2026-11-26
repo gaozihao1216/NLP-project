@@ -60,10 +60,10 @@ namespace StarPawn.Combat.Domain.Systems
             s.AimPoint = aim;
             s.HasAim = true;
 
+            // 开火只判「在射程内」。射界由炮座自己判——炮塔化之后一门炮能打 ±140°，
+            // 还按舰首 ±15° 卡的话，AI 会白白浪费掉几乎所有炮座。
             bool inRange = dist <= s.Stats.GunRangeKm * 0.95f;
-            bool inArc = Math.Abs(yawErrDeg) < BattleRules.GunArcHalfAngleDeg &&
-                         Math.Abs(pitchErrDeg) < BattleRules.GunArcHalfAngleDeg;
-            if (inRange && inArc) s.FireRequested = true;
+            if (inRange) s.FireRequested = true;
         }
 
         private static CombatShip NearestOpponent(CombatWorld w, CombatShip self)

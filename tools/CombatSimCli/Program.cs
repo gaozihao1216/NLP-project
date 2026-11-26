@@ -258,10 +258,9 @@ internal static class Program
                 });
             }
 
+            // 开火只判射程；射界由炮座判（炮塔化后一门炮能打 ±140°，不再按舰首 ±15° 卡）。
             float dist = (aim - pos).Length;
-            if (dist <= stats.GunRangeKm * 0.95f &&
-                Math.Abs(yawErr) < BattleRules.GunArcHalfAngleDeg &&
-                Math.Abs(pitchErr) < BattleRules.GunArcHalfAngleDeg)
+            if (dist <= stats.GunRangeKm * 0.95f)
                 runtime.Submit(new FireCommand { ShipId = s.ShipId });
         }
     }
@@ -315,7 +314,9 @@ internal static class Program
             " 限速 " + s.MaxSpeedKps.ToString("0") + "km/s" +
             " 盾 " + s.Shield.FrontDr.ToString("0.00") + "/" + s.Shield.SideDr.ToString("0.00") + "/" + s.Shield.RearDr.ToString("0.00") +
             " 池 " + s.Overload.BufferCapacity.ToString("0") + "/阈 " + s.Overload.Threshold.ToString("0") +
-            " 能源 " + s.Power.Capacity.ToString("0") + "点/再生 " + s.Power.RegenPerSec.ToString("0.0") + "/s");
+            " 能源 " + s.Power.Capacity.ToString("0") + "点/再生 " + s.Power.RegenPerSec.ToString("0.0") + "/s" +
+            " 炮座 " + s.Turrets.Length + "（单发 " +
+            string.Join("/", System.Linq.Enumerable.Select(s.Turrets, t => t.Damage.ToString("0"))) + "）");
     }
 
     private static void PrintStatus(CombatRuntime runtime, int tick)
@@ -331,6 +332,7 @@ internal static class Program
                 " hp=" + s.Health01.ToString("0.00") +
                 " 盾=" + (s.ShieldBroken ? "破" : s.Buffer01.ToString("0.00")) +
                 " en=" + s.Energy01.ToString("0.00") + (s.PropulsionLocked ? "(熄火)" : "") +
+                " 炮位 " + s.TurretsInArc + "/" + s.TurretCount + "（装填完 " + s.TurretsLoaded + "）" +
                 " 转速 " + s.YawRate.ToString("0.0") + "/" + s.PitchRate.ToString("0.0") + "°/s" +
                 (s.LockedTargetId.IsEmpty ? "" : " 锁定 " + s.LockedTargetId));
         }

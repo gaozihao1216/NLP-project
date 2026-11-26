@@ -13,8 +13,12 @@ namespace StarPawn.Combat.Domain
     {
         public BattleStartSpec Spec;
         public SimClock Clock;
-        /// <summary>全场唯一随机源。消费顺序固定，否则同 seed 结果会分叉。</summary>
-        public DeterministicRandom Rng;
+        /// <summary>
+        /// 全场唯一随机源。消费顺序固定，否则同 seed 结果会分叉。
+        /// 默认给一个 seed=0 的实例而不是留 null：手工构造世界（测试、灰盒探针）常常不走
+        /// CombatRuntime.Initialize，只要有人开一枪就会在散布里 NRE。正式开战由 Initialize 按种子覆盖。
+        /// </summary>
+        public DeterministicRandom Rng = new DeterministicRandom(0);
 
         public readonly List<CombatShip> Ships = new List<CombatShip>();
         public readonly List<Projectile> Shells = new List<Projectile>();

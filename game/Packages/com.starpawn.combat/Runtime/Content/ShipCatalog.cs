@@ -138,29 +138,53 @@ namespace StarPawn.Combat.Content
                 ["ship.a_patrol"] = Make(
                     120f, 32f, 45f, 20f, 180f, 220f, 3.2f, 0.85f, 0.20f,
                     new ManeuverProfile(4.0f, 45f, 27f, 81f, 180f, 108f, 324f),
-                    new PowerProfile(80f, 4.2f, 4.8f, 0.5f, 2.5f, 0.2f),
+                    new PowerProfile(80f, 4.2f, 4.8f, 0.5f, 1.25f, 0.2f),
                     new ShieldProfile(0.85f, 0.55f, 0.15f, 0.25f, 4f, 3f, 0.12f, 0.3f),
-                    new OverloadProfile(32f, 1.5f, 80f, 6f)),
+                    new OverloadProfile(32f, 1.5f, 80f, 6f),
+                    new[]
+                    {
+                        Turret("bow", 0f, 0.03f, 0.15f, 0f, 135f, 3.2f, 10f, 220f, 180f),
+                        Turret("stern", 0f, 0.02f, -0.15f, 180f, 135f, 3.2f, 10f, 220f, 180f)
+                    }),
                 ["ship.d_destroyer"] = Make(
                     300f, 28f, 32f, 40f, 240f, 260f, 4.5f, 0.88f, 0.27f,
                     new ManeuverProfile(3.5f, 32f, 19f, 58f, 128f, 76f, 230f),
-                    new PowerProfile(140f, 3.6f, 4.4f, 0.7f, 4.5f, 0.2f),
+                    new PowerProfile(140f, 3.6f, 4.4f, 0.7f, 1.5f, 0.2f),
                     new ShieldProfile(0.85f, 0.55f, 0.15f, 0.25f, 4f, 5f, 0.12f, 0.3f),
-                    new OverloadProfile(64f, 1.5f, 160f, 6f)),
+                    new OverloadProfile(64f, 1.5f, 160f, 6f),
+                    new[]
+                    {
+                        Turret("bow.l", 0.09f, 0.04f, 0.20f, 0f, 130f, 4.5f, 13f, 260f, 240f),
+                        Turret("bow.r", -0.09f, 0.04f, 0.20f, 0f, 130f, 4.5f, 13f, 260f, 240f),
+                        Turret("stern", 0f, 0.03f, -0.20f, 180f, 130f, 4.5f, 13f, 260f, 240f)
+                    }),
                 ["ship.g_cruiser"] = Make(
                     800f, 20f, 20f, 100f, 320f, 300f, 6f, 0.92f, 0.37f,
                     new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f),
-                    new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 7f, 0.18f),
+                    new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 1.75f, 0.18f),
                     new ShieldProfile(0.85f, 0.55f, 0.15f, 0.25f, 4f, 8f, 0.12f, 0.3f),
-                    new OverloadProfile(120f, 1.5f, 300f, 6f)),
+                    new OverloadProfile(120f, 1.5f, 300f, 6f),
+                    new[]
+                    {
+                        Turret("bow.l", 0.13f, 0.05f, 0.27f, 0f, 140f, 6f, 25f, 300f, 320f),
+                        Turret("bow.r", -0.13f, 0.05f, 0.27f, 0f, 140f, 6f, 25f, 300f, 320f),
+                        Turret("stern.l", 0.11f, 0.03f, -0.27f, 180f, 140f, 6f, 25f, 300f, 320f),
+                        Turret("stern.r", -0.11f, 0.03f, -0.27f, 180f, 140f, 6f, 25f, 300f, 320f)
+                    }),
             };
             return new ShipCatalog(map);
         }
 
+        /// <summary>内置镜像里的炮座。俯仰取缺省 -10..75、通道取动能，与 JSON 的缺省规则一致。</summary>
+        private static TurretProfile Turret(string id, float right, float up, float forward,
+            float yawCenter, float yawHalf, float reload, float damage, float velocity, float range)
+            => new TurretProfile(id, right, up, forward, yawCenter, yawHalf, -10f, 75f,
+                reload, damage, velocity, range, DamageChannel.Kinetic);
+
         private static ResolvedShipStats Make(float hp, float maxSpeed, float turnRate,
             float gunDamage, float gunRange, float shellVelocity, float reload,
             float accuracy, float hullRadius, ManeuverProfile maneuver, PowerProfile power,
-            ShieldProfile shield, OverloadProfile overload)
+            ShieldProfile shield, OverloadProfile overload, TurretProfile[] turrets)
             => new ResolvedShipStats(
                 maxHull: hp, maxSpeedKps: maxSpeed, turnRateDps: turnRate,
                 gunDamage: gunDamage, gunRangeKm: gunRange, shellVelocityKps: shellVelocity,
@@ -168,6 +192,7 @@ namespace StarPawn.Combat.Content
                 shieldCapacity: overload.BufferCapacity, shieldRegenPerSec: shield.RegenPerSec,
                 accuracy01: accuracy, hullRadiusKm: hullRadius, maneuver: maneuver,
                 maxSpreadDeg: ResolvedShipStats.DefaultMaxSpreadDeg, power: power,
-                armor: ArmorProfile.Default, shield: shield, overload: overload);
+                armor: ArmorProfile.Default, shield: shield, overload: overload,
+                turrets: turrets);
     }
 }

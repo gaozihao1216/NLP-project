@@ -1,8 +1,13 @@
-// 武器：装填、射程、射界锥、散布。炮弹真实飞行，不做瞬间命中。
-// 散布角与装填时间都来自舰体配置，代码里没有「8 度」「3.2 秒」这类常数。
+// 武器：按**炮座**装填、判射界、出弹。炮弹真实飞行，不做瞬间命中。
 //
-// 开火顺序是硬约束：装填 → 瞄准/射程 → 扣电 → 散布 → 出弹 → 重装填。
-// 任何一步失败都「什么都不改」：不扣电、不进装填、不动随机序列。
+// 炮塔化之后的四条硬约束：
+//   1. 装填是每座独立的。一门炮打出去只让那一门进 CD，其余照常待发——
+//      「齐射」只是同一 tick 里有多座恰好都好了，不是全舰共用一条 CD。
+//   2. 炮塔**不建模转向速度**。判两件事就够：装填好了没、目标在不在射界里。
+//      数十门炮各带转速会让「能不能打」取决于玩家读不出来的中间量。
+//   3. 射界用「中心角 + 半张角」判，出界就是不打（不像旧实现钳到锥边硬开一炮）。
+//      这一条同时解决了「炮弹不能打到自己舰体」：舰首炮半张角 140° 就伸不到舰尾。
+//   4. 任何一步失败都「什么都不改」：不扣电、不进装填、不动随机序列。
 
 using System;
 using StarPawn.Combat.Contracts;
@@ -13,88 +18,182 @@ namespace StarPawn.Combat.Domain.Systems
     public static class WeaponSystem
     {
         private const float Deg2Rad = 0.017453292f;
+        private const float Rad2Deg = 57.29578f;
 
         public static void Step(CombatWorld w, float dt)
         {
             for (int i = 0; i < w.Ships.Count; i++)
             {
                 var s = w.Ships[i];
-                if (!s.IsAlive) continue;
+                if (!s.IsAlive || s.Stats == null) continue;
+
+                var defs = s.Stats.Turrets;
+                // 直接 new 出来的舰（测试、假实现）没有走过 ResetTurrets，这里补一次。
+                if (s.TurretReload == null || s.TurretReload.Length != defs.Length) s.ResetTurrets();
 
                 // 交战档把能量给武器：装填最快；航行档武器最慢。分配是每舰自己的。
                 float reloadScale = 1.4f - 0.8f * Clamp01(s.Power.Weapons);
 
-                if (s.ReloadTimer > 0f) s.ReloadTimer -= dt;
+                for (int t = 0; t < s.TurretReload.Length; t++)
+                    if (s.TurretReload[t] > 0f) s.TurretReload[t] -= dt;
+
+                // 就位数每 tick 都算，不等开火请求：HUD 的「3/4 就位」要在没按开火时也准确。
+                CountReady(w, s, defs);
 
                 if (!s.FireRequested) continue;
                 s.FireRequested = false;
 
-                if (s.ReloadTimer > 0f)
+                if (s.TurretsLoaded == 0)
                 {
-                    w.Emit("NotReady", s.Id, default(EntityId), "装填未完成");
+                    if (!s.FireRejected)
+                        w.Emit("NotReady", s.Id, default(EntityId), "所有炮座都在装填");
+                    s.FireRejected = true;
                     continue;
                 }
 
-                // 顺序不能反：先确认这一发真的打得出去，再从储能池抽电。
-                // 旧实现先扣电再查射程，玩家对射程外的目标连点开火，炮弹没出来、装填没进，
-                // 电却每点一次少一笔——这类「看不见的白扣」最难被玩家归因。
-                // 没给瞄准点时沿舰首方向打，射程按炮的最大射程算。
-                Vec3 aim = s.HasAim
-                    ? s.AimPoint
-                    : s.Pos + s.Attitude.Forward * s.Stats.GunRangeKm;
-
-                Vec3 toAim = aim - s.Pos;
-                float dist = toAim.Length;
-                if (dist < 1e-3f)
+                if (s.TurretsInArc == 0)
                 {
-                    w.Emit("OutOfRange", s.Id, default(EntityId), "瞄准点与舰体重合");
+                    // 装填好了却一门都对不上：这是玩家最需要知道的信息（该转船了）。
+                    // 同一个「打不出去」状态连续出现时只报一次，否则 AI 每 tick 重提开火会把事件流刷满。
+                    if (!s.FireRejected)
+                        w.Emit("OutOfArc", s.Id, default(EntityId),
+                            "炮座已装填但目标不在任何射界内（" + s.TurretsInArc + "/" + s.TurretsLoaded + "）");
+                    s.FireRejected = true;
                     continue;
                 }
 
-                if (dist > s.Stats.GunRangeKm)
+                bool fired = false;
+                bool powerLow = false;
+
+                for (int t = 0; t < defs.Length; t++)
                 {
-                    w.Emit("OutOfRange", s.Id, default(EntityId),
-                        "目标 " + dist.ToString("0") + " km，超出射程 " + s.Stats.GunRangeKm.ToString("0"));
-                    continue;
+                    if (s.TurretReload[t] > 0f) continue;
+
+                    var turret = defs[t];
+                    Vec3 mount = MountWorld(s, turret);
+                    Vec3 dir;
+                    float dist;
+                    if (!TryAim(w, s, turret, mount, out dir, out dist)) continue;
+                    if (!InArc(s, turret, dir, out _)) continue;
+
+                    // 确认这一发真能打出去，再抽电。反过来的话，被拒的射击会白扣电。
+                    if (!PowerSystem.TryConsumeShot(w, s))
+                    {
+                        powerLow = true;
+                        break;
+                    }
+
+                    // 散布消费随机数，必须放在「确定打出去」之后，否则同 seed 会漂。
+                    dir = ApplySpread(w, s, dir);
+
+                    w.Shells.Add(new Projectile
+                    {
+                        Id = new EntityId(w.NextShellId()),
+                        OwnerId = s.Id,
+                        FromAlly = s.IsAlly,
+                        Pos = mount,
+                        PrevPos = mount,
+                        Vel = s.Velocity + dir * turret.ShellVelocityKps,
+                        Damage = turret.Damage,
+                        Channel = turret.Channel,
+                        MaxRangeKm = turret.MaxRangeKm,
+                        Alive = true
+                    });
+
+                    s.TurretReload[t] = turret.ReloadSeconds * reloadScale;
+                    fired = true;
+                    s.FireRejected = false;
+                    w.Emit("Fire", s.Id, default(EntityId),
+                        turret.Id + " 射程 " + dist.ToString("0") + " km");
                 }
 
-                // 开火要从储能池抽一笔电。抽不出来就不打——能源见底时武器和推进一起哑火。
-                if (!PowerSystem.TryConsumeShot(w, s))
+                if (powerLow)
                 {
-                    w.Emit("PowerLow", s.Id, default(EntityId), "能源不足，无法开火");
-                    continue;
+                    if (!s.FireRejected)
+                        w.Emit("PowerLow", s.Id, default(EntityId),
+                            fired ? "能源不足，剩余炮座未能开火" : "能源不足，无法开火");
+                    s.FireRejected = true;
                 }
 
-                // 固定炮有射界锥：出锥时钳到锥边，仍然开火，但事件里标记，HUD 可提示。
-                Vec3 dir = toAim / dist;
-                bool inArc = CombatMath.ClampToArc(
-                    s.Attitude.Forward, dir, BattleRules.GunArcHalfAngleDeg, out Vec3 aimedDir);
-                if (!inArc)
-                    w.Emit("OutOfArc", s.Id, default(EntityId), "目标超出射界，已钳到锥边");
-
-                // 散布要消费随机数：必须放在「这一发确定会打出去」之后，
-                // 否则一次被拒的开火也会改变随机序列，同 seed 的结果跟着漂。
-                dir = ApplySpread(w, s, aimedDir);
-
-                // 炮弹世界速度 = 舰速 + 炮口方向 × 弹速。
-                var shell = new Projectile
-                {
-                    Id = new EntityId(w.NextShellId()),
-                    OwnerId = s.Id,
-                    FromAlly = s.IsAlly,
-                    Pos = s.Pos,
-                    PrevPos = s.Pos,
-                    Vel = s.Velocity + dir * s.Stats.ShellVelocityKps,
-                    Damage = s.Stats.GunDamage,
-                    Channel = DamageChannel.Kinetic,
-                    MaxRangeKm = s.Stats.GunRangeKm,
-                    Alive = true
-                };
-                w.Shells.Add(shell);
-
-                s.ReloadTimer = s.Stats.ReloadSeconds * reloadScale;
-                w.Emit("Fire", s.Id, default(EntityId), "射程 " + dist.ToString("0") + " km");
+                // 刚打完的这一轮要把就位数重算一遍：否则快照会带着「4 门就位」多留一 tick，
+                // HUD 上表现为开火后亮一下才灭。这一步只是重数，不改任何状态。
+                CountReady(w, s, defs);
             }
+        }
+
+        /// <summary>炮座的世界位置。炮弹从这里出膛，而不是从舰体重心——近距离交火时差别肉眼可见。</summary>
+        private static Vec3 MountWorld(CombatShip s, TurretProfile t)
+            => s.Pos + s.Attitude.Rotate(t.MountLocal);
+
+        /// <summary>
+        /// 算出这一座炮该打的方向。有锁定就按**该炮自己的弹速**解提前量，
+        /// 没有就用玩家给的瞄准点，再没有就沿舰首打——三种来源统一在这里收口。
+        /// </summary>
+        private static bool TryAim(CombatWorld w, CombatShip s, TurretProfile t,
+            Vec3 mount, out Vec3 dir, out float dist)
+        {
+            dir = s.Attitude.Forward;
+            dist = 0f;
+
+            Vec3 aim;
+            CombatShip target = s.HasLock ? w.FindShip(s.LockedTargetId) : null;
+            if (target != null && target.IsAlive)
+            {
+                if (!CombatMath.TryLeadPoint(mount, s.Velocity, target.Pos, target.Velocity,
+                        t.ShellVelocityKps, out aim))
+                    aim = target.Pos;
+            }
+            else if (s.HasAim)
+            {
+                aim = s.AimPoint;
+            }
+            else
+            {
+                aim = mount + s.Attitude.Forward * t.MaxRangeKm;
+            }
+
+            Vec3 toAim = aim - mount;
+            float d = toAim.Length;
+            if (d < 1e-3f) return false;
+            if (d > t.MaxRangeKm) return false;
+
+            dir = toAim / d;
+            dist = d;
+            return true;
+        }
+
+        /// <summary>
+        /// 是否落在该炮座的射界内。方位角绕 ±180° 归一后再比半张角，
+        /// 所以舰尾炮写 center=180 不需要任何跨零特判。
+        /// </summary>
+        public static bool InArc(CombatShip s, TurretProfile t, Vec3 dirWorld, out float yawDeg)
+        {
+            Vec3 local = s.Attitude.Conjugate.Rotate(dirWorld);
+            yawDeg = (float)Math.Atan2(local.X, local.Z) * Rad2Deg;
+            float elev = (float)Math.Asin(Clamp(local.Y, -1f, 1f)) * Rad2Deg;
+
+            if (elev < t.PitchMinDeg || elev > t.PitchMaxDeg) return false;
+
+            float d = yawDeg - t.YawCenterDeg;
+            d -= 360f * (float)Math.Round(d / 360.0);
+            return Math.Abs(d) <= t.YawHalfArcDeg + 1e-3f;
+        }
+
+        /// <summary>装填完 + 射界内 = 就位。两种情况分开报，HUD 才能区分「在冷却」和「该转向了」。</summary>
+        private static void CountReady(CombatWorld w, CombatShip s, TurretProfile[] defs)
+        {
+            int loaded = 0, inArc = 0;
+            for (int t = 0; t < defs.Length; t++)
+            {
+                if (s.TurretReload[t] > 0f) continue;
+                loaded++;
+                Vec3 dir;
+                float dist;
+                if (!TryAim(w, s, defs[t], MountWorld(s, defs[t]), out dir, out dist)) continue;
+                if (InArc(s, defs[t], dir, out _)) inArc++;
+            }
+            s.TurretsLoaded = loaded;
+            s.TurretsInArc = inArc;
         }
 
         /// <summary>
@@ -119,5 +218,6 @@ namespace StarPawn.Combat.Domain.Systems
         }
 
         private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
+        private static float Clamp(float v, float min, float max) => v < min ? min : (v > max ? max : v);
     }
 }

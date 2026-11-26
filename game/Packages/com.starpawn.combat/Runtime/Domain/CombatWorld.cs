@@ -26,6 +26,12 @@ namespace StarPawn.Combat.Domain
         /// <summary>滚转姿态回平（可选层，默认关闭）。太空没有「上」，所以不默认开启。</summary>
         public bool RollLeveling;
 
+        /// <summary>
+        /// 转向损耗开关（默认开）：高速自转时护盾场不稳，DR 按 1 − 0.25×负荷 打折。
+        /// 留成开关是因为灰盒要开/关各跑一次——不动玩家行为就该删掉这条规则。
+        /// </summary>
+        public bool TurnLossEnabled = true;
+
         private int _nextShellSerial;
         private int _nextObstacleSerial;
 

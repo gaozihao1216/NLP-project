@@ -18,6 +18,8 @@ namespace StarPawn.Combat.Domain
         public Vec3 Vel;
 
         public float Damage;
+        /// <summary>伤害通道。装甲的减伤按它分支，不按弹丸外观分支。</summary>
+        public DamageChannel Channel = DamageChannel.Kinetic;
         public float MaxRangeKm;
         public float TravelledKm;
         public bool Alive = true;

@@ -3,9 +3,13 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using StarPawn.Application;
 using StarPawn.Bootstrap;
+using StarPawn.Combat.Content;
 using StarPawn.Combat.Contracts;
+using StarPawn.Combat.Domain;
+using StarPawn.Combat.Domain.Systems;
 using StarPawn.Economy.Contracts;
 using StarPawn.Fleet.Contracts;
 using StarPawn.Foundation;
@@ -29,6 +33,51 @@ internal static class Program
         for (int i = 0; i < 10; i++) f.StepBattle();
     }
 
+    /// <summary>护盾单测用的最小世界：只有时钟，没有编成与地形。</summary>
+    private static CombatWorld ShieldWorld()
+        => new CombatWorld { Clock = new SimClock(0, 1f / 30f) };
+
+    private static CombatShip ShieldTarget(CombatWorld w, ResolvedShipStats stats, float energy = -1f)
+    {
+        var s = new CombatShip
+        {
+            Id = new EntityId("target"),
+            Stats = stats,
+            Pos = Vec3.Zero,
+            ShieldBuffer = stats.Overload.BufferCapacity,
+            // 全舰记账后每艘舰都有真实储能：默认满电，要测「电不够」就显式传 energy。
+            Energy = energy >= 0f ? energy : stats.Power.Capacity,
+            LastHitTime = -999f
+        };
+        w.Ships.Add(s);
+        return s;
+    }
+
+    /// <summary>推进仿真时钟并让 ShieldSystem 走一遍：剪窗口、破盾恢复、延迟回充都靠它。</summary>
+    private static void Advance(CombatWorld w, float seconds)
+    {
+        int ticks = (int)Math.Round(seconds / w.Clock.FixedStep);
+        for (int i = 0; i < ticks; i++)
+        {
+            ShieldSystem.Step(w, w.Clock.FixedStep);
+            w.Clock = w.Clock.Advance();
+        }
+    }
+
+    /// <summary>
+    /// 护盾测试基线：三面 DR 走设计稿，池 300 / 阈值 120，装甲按默认通道值。
+    /// 缓冲池、阈值、DR 全显式给，避免测试跟着缺省推导漂移。
+    /// </summary>
+    private static ResolvedShipStats ShieldStats(float frontDr = 0.85f, float drainPerDamage = 0.12f,
+        float armorKinetic = 0.35f)
+        => new ResolvedShipStats(
+            800f, 20f, 20f, 100f, 320f, 300f, 6f, 300f, 8f, 0.92f,
+            0.37f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f,
+            new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 7f, 0.18f),
+            new ArmorProfile(0.20f, armorKinetic),
+            new ShieldProfile(frontDr, frontDr, frontDr, 0.25f, 4f, 8f, drainPerDamage, 0.3f),
+            new OverloadProfile(120f, 1.5f, 300f, 6f));
+
     private static GameServices Build(out CampaignFacade facade)
     {
         var s = new GameServices
@@ -40,6 +89,8 @@ internal static class Program
             Relations = new StarPawn.Relations.Domain.FakeRelationsService(),
             Narrative = new StarPawn.Narrative.Domain.FakeNarrativeRuntime(),
             Combat = new StarPawn.Combat.Domain.FakeCombatRuntime(),
+            // 配置源用内置镜像：契约测试不该依赖磁盘上 content 是否存在。
+            Ships = ShipCatalog.Builtin,
             Advisor = new StarPawn.Officer.Domain.RuleBasedOfficer()
         };
         facade = new CampaignFacade(s);
@@ -50,6 +101,76 @@ internal static class Program
     {
         foreach (var b in s.Economy.Read().Balances) if (b.Kind == ResourceKind.Credits) return b.Amount;
         return -1;
+    }
+
+    /// <summary>从 cwd 与程序目录各向上找 content/ships，兼容「仓库根运行」与「tools/SmokeTests 下运行」。</summary>
+    private static string FindContentShipsDir()
+    {
+        var starts = new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
+        foreach (var start in starts)
+        {
+            var dir = new DirectoryInfo(start);
+            for (int i = 0; i < 8 && dir != null; i++, dir = dir.Parent)
+            {
+                var path = Path.Combine(dir.FullName, "content", "ships");
+                if (Directory.Exists(path)) return path;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>逐字段比对两份属性，返回第一个差异的描述；完全一致返回 null。</summary>
+    private static string DiffStats(ResolvedShipStats a, ResolvedShipStats b)
+    {
+        var d = new List<string>();
+        void Num(string name, float x, float y)
+        {
+            if (Math.Abs(x - y) > 1e-4f) d.Add(name + " " + x.ToString("0.####") + "≠" + y.ToString("0.####"));
+        }
+
+        Num("hp", a.MaxHull, b.MaxHull);
+        Num("maxSpeed", a.MaxSpeedKps, b.MaxSpeedKps);
+        Num("gunDamage", a.GunDamage, b.GunDamage);
+        Num("gunRange", a.GunRangeKm, b.GunRangeKm);
+        Num("shellVelocity", a.ShellVelocityKps, b.ShellVelocityKps);
+        Num("reload", a.ReloadSeconds, b.ReloadSeconds);
+        Num("accuracy", a.Accuracy01, b.Accuracy01);
+        Num("hullRadius", a.HullRadiusKm, b.HullRadiusKm);
+        Num("maxSpread", a.MaxSpreadDeg, b.MaxSpreadDeg);
+
+        Num("thrust", a.Maneuver.MaxThrustKmS2, b.Maneuver.MaxThrustKmS2);
+        Num("yawRate", a.Maneuver.YawRateDps, b.Maneuver.YawRateDps);
+        Num("pitchRate", a.Maneuver.PitchRateDps, b.Maneuver.PitchRateDps);
+        Num("rollRate", a.Maneuver.RollRateDps, b.Maneuver.RollRateDps);
+        Num("yawAccel", a.Maneuver.YawAccelDps2, b.Maneuver.YawAccelDps2);
+        Num("pitchAccel", a.Maneuver.PitchAccelDps2, b.Maneuver.PitchAccelDps2);
+        Num("rollAccel", a.Maneuver.RollAccelDps2, b.Maneuver.RollAccelDps2);
+
+        Num("powerCapacity", a.Power.Capacity, b.Power.Capacity);
+        Num("powerRegen", a.Power.RegenPerSec, b.Power.RegenPerSec);
+        Num("propulsionDrain", a.Power.PropulsionDrainPerSec, b.Power.PropulsionDrainPerSec);
+        Num("turnDrain", a.Power.TurnDrainPerSec, b.Power.TurnDrainPerSec);
+        Num("weaponDrain", a.Power.WeaponDrainPerShot, b.Power.WeaponDrainPerShot);
+        Num("restart", a.Power.RestartFraction, b.Power.RestartFraction);
+
+        Num("beamDr", a.Armor.BeamDr, b.Armor.BeamDr);
+        Num("kineticDr", a.Armor.KineticDr, b.Armor.KineticDr);
+
+        Num("frontDr", a.Shield.FrontDr, b.Shield.FrontDr);
+        Num("sideDr", a.Shield.SideDr, b.Shield.SideDr);
+        Num("rearDr", a.Shield.RearDr, b.Shield.RearDr);
+        Num("turnLoss", a.Shield.TurnLossFactor, b.Shield.TurnLossFactor);
+        Num("regenDelay", a.Shield.RegenDelaySeconds, b.Shield.RegenDelaySeconds);
+        Num("bufferRegen", a.Shield.RegenPerSec, b.Shield.RegenPerSec);
+        Num("drainPerDamage", a.Shield.DrainPerDamage, b.Shield.DrainPerDamage);
+        Num("recoverFraction", a.Shield.RecoverFraction, b.Shield.RecoverFraction);
+
+        Num("threshold", a.Overload.Threshold, b.Overload.Threshold);
+        Num("window", a.Overload.WindowSeconds, b.Overload.WindowSeconds);
+        Num("bufferCapacity", a.Overload.BufferCapacity, b.Overload.BufferCapacity);
+        Num("breakSeconds", a.Overload.BreakSeconds, b.Overload.BreakSeconds);
+
+        return d.Count == 0 ? null : string.Join(", ", d);
     }
 
     private static void Main()
@@ -385,17 +506,18 @@ internal static class Program
             }
             var snap = rt.ReadSnapshot();
             bool closedIn = snap.Ships[1].Z < 119f;
-            bool hurt = snap.Ships[0].Shield01 < 1f || snap.Ships[0].Health01 < 1f;
+            bool hurt = snap.Ships[0].ShieldBroken || snap.Ships[0].Buffer01 < 1f || snap.Ships[0].Health01 < 1f;
             Check("真实战斗：敌舰开火", sawFire);
             Check("真实战斗：敌舰主动接近", closedIn, "z=" + snap.Ships[1].Z.ToString("0.0"));
             Check("真实战斗：命中造成掉血", hurt,
-                "shield=" + snap.Ships[0].Shield01.ToString("0.00") + " hull=" + snap.Ships[0].Health01.ToString("0.00"));
+                "池=" + snap.Ships[0].Buffer01.ToString("0.00") + " 破盾=" + snap.Ships[0].ShieldBroken +
+                " hull=" + snap.Ships[0].Health01.ToString("0.00"));
         }
 
         // 19. 能源：满推力持续消耗 → 耗尽锁推进 → 回充后恢复
         {
             // 小容量 + 低再生 + 高耗电，10 秒左右就能把电打空，不必真跑五分钟。
-            var power = new PowerProfile(40f, 1.0f, 5.0f, 0f, 0f, 1f, 0.25f);
+            var power = new PowerProfile(40f, 1.0f, 5.0f, 0f, 1f, 0.25f);
             var spec = new BattleStartSpec
             {
                 BattleId = new EntityId("battle.energy"),
@@ -610,6 +732,209 @@ internal static class Program
             var clear = rt.Submit(new LockTargetCommand { ShipId = ally });
             Check("空目标等于解除锁定",
                 clear.Success && rt.ReadSnapshot().Ships[0].LockedTargetId.IsEmpty);
+        }
+
+        // 22. 判面：三档 DR 必须真的改变穿透量（这是「打哪一面」有意义的全部前提）
+        {
+            var w = ShieldWorld();
+            var s = ShieldTarget(w, ShieldStats());
+            var src = new EntityId("attacker");
+
+            // incomingDir 是「从目标指向威胁来源」：+Z 表示打脸，−Z 表示打屁股
+            var front = DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 100f, new Vec3(0f, 0f, 1f));
+            var side = DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 100f, new Vec3(1f, 0f, 0f));
+            var rear = DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 100f, new Vec3(0f, 0f, -1f));
+
+            Check("正面/侧面/背面判对",
+                front.Face == ShieldFace.Front && side.Face == ShieldFace.Side && rear.Face == ShieldFace.Rear,
+                front.Face.ToString() + "/" + side.Face.ToString() + "/" + rear.Face.ToString());
+            Check("正面盾挡 0.85、侧面 0.55、背面 0.15",
+                Math.Abs(front.ShieldDr - 0.85f) < 1e-3f &&
+                Math.Abs(side.ShieldDr - 0.55f) < 1e-3f &&
+                Math.Abs(rear.ShieldDr - 0.15f) < 1e-3f,
+                front.ShieldDr.ToString("0.000") + "/" + side.ShieldDr.ToString("0.000") + "/" + rear.ShieldDr.ToString("0.000"));
+            Check("三面穿透量单调递增（背面最痛）",
+                front.ToHull < side.ToHull && side.ToHull < rear.ToHull,
+                front.ToHull.ToString("0.00") + " < " + side.ToHull.ToString("0.00") + " < " + rear.ToHull.ToString("0.00"));
+            // 100 × (1−0.85) × (1−0.35) = 9.75
+            Check("装甲按通道减伤：正面入舰体 9.75",
+                Math.Abs(front.ToHull - 9.75f) < 0.01f, front.ToHull.ToString("0.000"));
+        }
+
+        // 23. 转向损耗：满转时盾变薄，且这条规则可以整体关掉
+        {
+            var w = ShieldWorld();
+            var s = ShieldTarget(w, ShieldStats());
+
+            float rest = ShieldSystem.EffectiveDr(w, s, ShieldFace.Front);
+            s.AngularVelocity = new Vec3(0f, 20f, 0f);                  // 巡洋舰满偏航 20 °/s
+            float turning = ShieldSystem.EffectiveDr(w, s, ShieldFace.Front);
+            w.TurnLossEnabled = false;
+            float off = ShieldSystem.EffectiveDr(w, s, ShieldFace.Front);
+
+            Check("静止时正面 DR 是常驻值", Math.Abs(rest - 0.85f) < 1e-3f, rest.ToString("0.000"));
+            Check("满转时正面 DR 掉四分之一", Math.Abs(turning - 0.6375f) < 1e-3f, turning.ToString("0.000"));
+            Check("转向损耗把正面拉到侧舷档位附近（设计意图）", Math.Abs(turning - 0.55f) < 0.1f);
+            Check("关掉转向损耗后回到常驻值", Math.Abs(off - 0.85f) < 1e-3f, off.ToString("0.000"));
+        }
+
+        // 24. 抗伤耗电：电不够时先削 DR，不是继续免费扛
+        {
+            var w = ShieldWorld();
+            // 应付电 = 100 × 0.85 × 0.12 = 10.2，实际只有 1 点
+            var s = ShieldTarget(w, ShieldStats(), energy: 1f);
+            var hit = DamageResolver.ResolveHit(w, s, new EntityId("attacker"),
+                DamageChannel.Kinetic, 100f, new Vec3(0f, 0f, 1f));
+
+            Check("电不够时护盾变薄", hit.ShieldDr < 0.1f && hit.Absorbed < 9f,
+                "dr=" + hit.ShieldDr.ToString("0.000") + " absorbed=" + hit.Absorbed.ToString("0.00"));
+            Check("削 DR 后能源恰好清零", s.Energy < 1e-4f, s.Energy.ToString("0.0000"));
+            Check("少挡的部分转成穿透", hit.ToHull > 55f, hit.ToHull.ToString("0.00"));
+        }
+
+        // 25. 过载：单舰一轮打不破，双舰同窗口三轮破；破盾那一击不穿透
+        {
+            var w = ShieldWorld();
+            // 三面 DR 拉满、装甲为零：只测过载账，不让 DR 与装甲干扰轮数
+            var s = ShieldTarget(w, ShieldStats(frontDr: 1f, drainPerDamage: 0f, armorKinetic: 0f));
+            var src = new EntityId("attacker");
+            var dir = new Vec3(0f, 0f, 1f);
+
+            // 每轮两发 130 = 窗口内 260，超额 140
+            DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 130f, dir);
+            DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 130f, dir);
+            Check("第 1 轮齐射：缓冲池 300 → 160", Math.Abs(s.ShieldBuffer - 160f) < 0.01f,
+                s.ShieldBuffer.ToString("0.0"));
+
+            Advance(w, 2f);          // 窗口清空，但 4 s 回充延迟未到
+            DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 130f, dir);
+            DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 130f, dir);
+            Check("第 2 轮齐射：只剩 20", Math.Abs(s.ShieldBuffer - 20f) < 0.01f,
+                s.ShieldBuffer.ToString("0.0"));
+
+            float hullBefore = s.Hull;
+            Advance(w, 2f);
+            DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 130f, dir);
+            DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 130f, dir);
+            Check("第 3 轮才破盾（v0.3「两轮必破」是错的）", s.ShieldBroken, "buffer=" + s.ShieldBuffer.ToString("0.0"));
+            Check("打空池的那一击仍按已算 DR 结算，不穿透", Math.Abs(s.Hull - hullBefore) < 1e-3f,
+                "Δhull=" + (hullBefore - s.Hull).ToString("0.00"));
+
+            // 破盾从下一击开始：DR 归零，全额进舰体
+            float hullAtBreak = s.Hull;
+            var afterBreak = DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 100f, dir);
+            Check("破盾后 DR 归零且吸收为零", afterBreak.ShieldDr <= 0f && afterBreak.Absorbed <= 0f);
+            Check("破盾后伤害全额进舰体", Math.Abs((hullAtBreak - s.Hull) - 100f) < 0.01f,
+                (hullAtBreak - s.Hull).ToString("0.00"));
+
+            Advance(w, 6.05f);
+            Check("失效 6 s 后解除破盾", !s.ShieldBroken);
+            Check("恢复只回三成（210 点仍是空的）", Math.Abs(s.ShieldBuffer - 90f) < 3f,
+                s.ShieldBuffer.ToString("0.0"));
+        }
+
+        // 26. 延迟回充：4 s 未受击才启动，早一秒都不回
+        {
+            var w = ShieldWorld();
+            var s = ShieldTarget(w, ShieldStats(frontDr: 1f, drainPerDamage: 0f, armorKinetic: 0f));
+            var src = new EntityId("attacker");
+            var dir = new Vec3(0f, 0f, 1f);
+
+            DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 130f, dir);
+            DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 130f, dir);
+
+            Advance(w, 3f);
+            Check("3 s 内不回充", Math.Abs(s.ShieldBuffer - 160f) < 0.01f, s.ShieldBuffer.ToString("0.0"));
+
+            Advance(w, 2.5f);
+            Check("过了 4 s 开始回充", s.ShieldBuffer > 165f, s.ShieldBuffer.ToString("0.0"));
+        }
+
+        // 27. 全舰记账：护航舰与敌舰同样扣电（T06 删掉了「只算主舰」的开关）
+        {
+            var w = ShieldWorld();
+            var stats = ShieldStats();
+
+            CombatShip Make(string id, bool ally)
+            {
+                var s = new CombatShip
+                {
+                    Id = new EntityId(id),
+                    Stats = stats,
+                    IsAlly = ally,
+                    Role = StarPawn.Combat.Contracts.SquadRole.Escort,
+                    Energy = stats.Power.Capacity,
+                    ThrustSetpoint = 1f,        // 满推：耗电最高的档
+                    LastHitTime = -999f
+                };
+                w.Ships.Add(s);
+                return s;
+            }
+
+            var ally = Make("ally.escort", true);
+            var enemy = Make("enemy.01", false);
+            float allyStart = ally.Energy, enemyStart = enemy.Energy;
+
+            for (int i = 0; i < 300; i++)     // 10 s
+            {
+                PowerSystem.Step(w, w.Clock.FixedStep);
+                w.Clock = w.Clock.Advance();
+            }
+
+            Check("护航舰满推 10 s 会掉电（不再按满电处理）",
+                ally.Energy < allyStart - 5f, allyStart.ToString("0.0") + " → " + ally.Energy.ToString("0.0"));
+            Check("敌舰同样记账", enemy.Energy < enemyStart - 5f,
+                enemyStart.ToString("0.0") + " → " + enemy.Energy.ToString("0.0"));
+        }
+
+        // 28. 配置加载：JSON → ResolvedShipStats，且内置镜像必须与磁盘配置一致
+        {
+            string shipsDir = FindContentShipsDir();
+            Check("找得到 content/ships", shipsDir != null, "找不到则本机 cwd 不在仓库内");
+
+            if (shipsDir != null)
+            {
+                string[] errors;
+                var disk = ShipCatalog.LoadDirectory(shipsDir, out errors);
+                Check("三份舰体配置全部解析通过", errors.Length == 0 && disk.Count == 3,
+                    "count=" + disk.Count + " errors=" + string.Join("; ", errors));
+
+                ResolvedShipStats cruiser;
+                bool ok = disk.TryGet("ship.g_cruiser", out cruiser);
+                Check("读到的数值与 JSON 一致（关键项抽查）",
+                    ok &&
+                    Math.Abs(cruiser.MaxHull - 800f) < 1e-3f &&
+                    Math.Abs(cruiser.GunDamage - 100f) < 1e-3f &&
+                    Math.Abs(cruiser.Accuracy01 - 0.92f) < 1e-4f &&
+                    Math.Abs(cruiser.Shield.FrontDr - 0.85f) < 1e-4f &&
+                    Math.Abs(cruiser.Overload.Threshold - 120f) < 1e-3f &&
+                    Math.Abs(cruiser.Power.TurnDrainPerSec - 0.9f) < 1e-4f &&
+                    Math.Abs(cruiser.Maneuver.MaxThrustKmS2 - 2.5f) < 1e-4f,
+                    ok ? cruiser.MaxHull + "/" + cruiser.GunDamage + "/" + cruiser.Shield.FrontDr : "缺少 ship.g_cruiser");
+
+                // 内置镜像只是兜底，一旦与 JSON 漂移就会让「测试通过但游戏里的数是旧的」。
+                var builtin = ShipCatalog.Builtin;
+                var diffs = new List<string>();
+                foreach (var id in new[] { "ship.a_patrol", "ship.d_destroyer", "ship.g_cruiser" })
+                {
+                    ResolvedShipStats fromDisk, fromCode;
+                    if (!disk.TryGet(id, out fromDisk) || !builtin.TryGet(id, out fromCode)) { diffs.Add(id + " 缺失"); continue; }
+                    string diff = DiffStats(fromDisk, fromCode);
+                    if (diff != null) diffs.Add(id + ": " + diff);
+                }
+                Check("内置镜像与 content/ships 逐字段一致", diffs.Count == 0, string.Join(" | ", diffs));
+
+                // 缺字段必须报错，且要指出路径——静默补缺省正是 T01b 要消灭的东西
+                string text = File.ReadAllText(Path.Combine(shipsDir, "g_cruiser.json"));
+                string broken = text.Replace("\"frontDr\": 0.85,", "");
+                string bid;
+                ResolvedShipStats bstats;
+                string[] berrors;
+                bool parsed = ShipConfigParser.TryParse(broken, out bid, out bstats, out berrors);
+                Check("缺 shield.frontDr 时解析失败并指出字段",
+                    !parsed && string.Join("; ", berrors).Contains("shield.frontDr"),
+                    parsed ? "居然解析成功了" : string.Join("; ", berrors));
+            }
         }
 
         Console.WriteLine($"\n=== 结果：{_passed} 通过，{_failed} 失败 ===");

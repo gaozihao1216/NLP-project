@@ -139,8 +139,6 @@ namespace StarPawn.Combat.Contracts
         public readonly float PropulsionDrainPerSec;
         /// <summary>三轴姿态控制满输入时的额外耗电率（每秒）。RCS 和主推进共用一路电力。</summary>
         public readonly float TurnDrainPerSec;
-        /// <summary>护盾按标称速率回充时的耗电率（每秒）。</summary>
-        public readonly float ShieldDrainPerSec;
         /// <summary>每次开火消耗的点数。</summary>
         public readonly float WeaponDrainPerShot;
         /// <summary>
@@ -150,20 +148,138 @@ namespace StarPawn.Combat.Contracts
         public readonly float RestartFraction;
 
         public PowerProfile(float capacity, float regenPerSec, float propulsionDrainPerSec,
-            float turnDrainPerSec, float shieldDrainPerSec, float weaponDrainPerShot, float restartFraction)
+            float turnDrainPerSec, float weaponDrainPerShot, float restartFraction)
         {
             Capacity = capacity > 1f ? capacity : 1f;
             RegenPerSec = regenPerSec > 0f ? regenPerSec : 0f;
             PropulsionDrainPerSec = propulsionDrainPerSec > 0f ? propulsionDrainPerSec : 0f;
             TurnDrainPerSec = turnDrainPerSec > 0f ? turnDrainPerSec : 0f;
-            ShieldDrainPerSec = shieldDrainPerSec > 0f ? shieldDrainPerSec : 0f;
             WeaponDrainPerShot = weaponDrainPerShot > 0f ? weaponDrainPerShot : 0f;
             RestartFraction = restartFraction > 0f && restartFraction < 1f ? restartFraction : 0.2f;
         }
 
         /// <summary>缺省值：只在配置缺失时使用（假实现、单元测试、旧调用点）。</summary>
         public static PowerProfile Default =>
-            new PowerProfile(120f, 3.4f, 2.2f, 0.8f, 1.2f, 5f, 0.2f);
+            new PowerProfile(120f, 3.4f, 2.2f, 0.8f, 5f, 0.2f);
+    }
+
+    /// <summary>伤害通道。防御响应的分支就按它走，不按武器名。</summary>
+    public enum DamageChannel
+    {
+        /// <summary>光束：瞬时命中、不吃跳弹与入射角。</summary>
+        Beam = 0,
+        /// <summary>有限速度投射体：有弹道、有飞行时间。</summary>
+        Kinetic = 1,
+    }
+
+    /// <summary>受击面。绑定舰体的方向盾只有这三档，没有独立朝向角。</summary>
+    public enum ShieldFace { Front = 0, Side = 1, Rear = 2 }
+
+    /// <summary>
+    /// 装甲：按通道给固定减伤。`DamageReduction` 一律表示「被挡掉的比例」，
+    /// 实际伤害 = 伤害 × (1 − DR)。不要把它读成「承受比例」。
+    /// </summary>
+    public readonly struct ArmorProfile
+    {
+        public readonly float BeamDr;
+        public readonly float KineticDr;
+
+        public ArmorProfile(float beamDr, float kineticDr)
+        {
+            BeamDr = Clamp01(beamDr);
+            KineticDr = Clamp01(kineticDr);
+        }
+
+        public float DrFor(DamageChannel channel)
+            => channel == DamageChannel.Beam ? BeamDr : KineticDr;
+
+        /// <summary>缺省：光束穿薄甲、投射体吃厚甲，与护盾的强弱互补。</summary>
+        public static ArmorProfile Default => new ArmorProfile(0.20f, 0.35f);
+
+        private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
+    }
+
+    /// <summary>
+    /// 护盾几何与成本。盾面强化方向恒为舰体局部 +Z（绑定舰体，见设计稿 6.1），
+    /// 因此这里没有朝向角，只有三档 DR、转向损耗、回充与「每点吸收要付多少电」。
+    /// </summary>
+    public readonly struct ShieldProfile
+    {
+        /// <summary>正/侧/背三档减伤。θ ≤45° 正面、45–135° 侧面、>135° 背面。</summary>
+        public readonly float FrontDr;
+        public readonly float SideDr;
+        public readonly float RearDr;
+        /// <summary>满转时的 DR 衰减比例（0.25 = 掉四分之一）。可被 CombatWorld.TurnLossEnabled 整体关掉。</summary>
+        public readonly float TurnLossFactor;
+        /// <summary>受击后多久开始回充缓冲池（秒）。</summary>
+        public readonly float RegenDelaySeconds;
+        /// <summary>缓冲池回充速率（点/秒），按护盾能量份额与供电状态折算。</summary>
+        public readonly float RegenPerSec;
+        /// <summary>每点被挡掉的伤害要付多少电。付不起时 DR 按可用电比例变薄，不是免费扛。</summary>
+        public readonly float DrainPerDamage;
+        /// <summary>破盾失效结束后的缓冲池恢复比例（0.3 = 只回三成）。</summary>
+        public readonly float RecoverFraction;
+
+        public ShieldProfile(float frontDr, float sideDr, float rearDr,
+            float turnLossFactor, float regenDelaySeconds, float regenPerSec,
+            float drainPerDamage, float recoverFraction)
+        {
+            FrontDr = Clamp01(frontDr);
+            SideDr = Clamp01(sideDr);
+            RearDr = Clamp01(rearDr);
+            TurnLossFactor = Clamp01(turnLossFactor);
+            RegenDelaySeconds = regenDelaySeconds > 0f ? regenDelaySeconds : 0f;
+            RegenPerSec = regenPerSec > 0f ? regenPerSec : 0f;
+            DrainPerDamage = drainPerDamage > 0f ? drainPerDamage : 0f;
+            RecoverFraction = recoverFraction > 0f && recoverFraction <= 1f ? recoverFraction : 0.3f;
+        }
+
+        public float FaceDr(ShieldFace face)
+        {
+            switch (face)
+            {
+                case ShieldFace.Front: return FrontDr;
+                case ShieldFace.Side: return SideDr;
+                default: return RearDr;
+            }
+        }
+
+        /// <summary>缺省：三档 DR 与成本走设计稿基线，只把回充速率交给调用方。</summary>
+        public static ShieldProfile DefaultFor(float regenPerSec)
+            => new ShieldProfile(0.85f, 0.55f, 0.15f, 0.25f, 4f, regenPerSec, 0.12f, 0.3f);
+
+        private static float Clamp01(float v) => v < 0f ? 0f : (v > 1f ? 1f : v);
+    }
+
+    /// <summary>
+    /// 过载：短窗口内吸收量超阈值才扣缓冲池，池空则护盾失效。
+    /// 阈值与池容量都是舰体参数——小舰的池小、阈值也小，否则一碰就碎。
+    /// </summary>
+    public readonly struct OverloadProfile
+    {
+        /// <summary>窗口内累计吸收量的阈值。低于它不消耗缓冲池。</summary>
+        public readonly float Threshold;
+        /// <summary>滑动窗口长度（秒）。</summary>
+        public readonly float WindowSeconds;
+        /// <summary>缓冲池容量。过载时只扣「超出阈值的增量」。</summary>
+        public readonly float BufferCapacity;
+        /// <summary>破盾后的失效时长（秒），期间 DR = 0 且一切回充暂停。</summary>
+        public readonly float BreakSeconds;
+
+        public OverloadProfile(float threshold, float windowSeconds, float bufferCapacity, float breakSeconds)
+        {
+            Threshold = threshold > 0f ? threshold : 1f;
+            WindowSeconds = windowSeconds > 0f ? windowSeconds : 1.5f;
+            BufferCapacity = bufferCapacity > 0f ? bufferCapacity : 1f;
+            BreakSeconds = breakSeconds > 0f ? breakSeconds : 6f;
+        }
+
+        /// <summary>
+        /// 缺省：阈值按缓冲池的 0.4 倍给（巡洋舰 300 → 120，与设计稿基线一致）。
+        /// 小舰不按同一绝对阈值，否则 80 点的池会被两发齐射直接打穿。
+        /// </summary>
+        public static OverloadProfile DefaultFor(float bufferCapacity)
+            => new OverloadProfile(bufferCapacity * 0.4f, 1.5f, bufferCapacity, 6f);
     }
 
     /// <summary>
@@ -201,8 +317,6 @@ namespace StarPawn.Combat.Contracts
         public readonly float GunRangeKm;
         public readonly float ShellVelocityKps;
         public readonly float ReloadSeconds;
-        public readonly float ShieldCapacity;
-        public readonly float ShieldRegenPerSec;
         public readonly float Accuracy01;
 
         /// <summary>碰撞半径 km。舰体尺寸参数，不由血量推导（血量只是缺省值来源）。</summary>
@@ -213,6 +327,12 @@ namespace StarPawn.Combat.Contracts
         public readonly float MaxSpreadDeg;
         /// <summary>能源参数：容量、再生与各路耗电率。</summary>
         public readonly PowerProfile Power;
+        /// <summary>装甲减伤，按通道给。</summary>
+        public readonly ArmorProfile Armor;
+        /// <summary>护盾几何、转向损耗与抗伤耗电。</summary>
+        public readonly ShieldProfile Shield;
+        /// <summary>过载缓冲池与破盾失效。</summary>
+        public readonly OverloadProfile Overload;
 
         /// <summary>
         /// 配置缺省散布上限（度）。标定依据：在 60% 射程上，落点散布半径约等于 1.4 倍舰体半径，
@@ -232,7 +352,7 @@ namespace StarPawn.Combat.Contracts
         {
         }
 
-        /// <summary>完整构造：真实配置走这条，机动与半径都显式给出，能源走缺省。</summary>
+        /// <summary>完整构造：机动与半径显式给出，能源/护盾/装甲走缺省（测试与旧调用点用）。</summary>
         public ResolvedShipStats(float maxHull, float maxSpeedKps, float turnRateDps,
             float gunDamage, float gunRangeKm, float shellVelocityKps, float reloadSeconds,
             float shieldCapacity, float shieldRegenPerSec, float accuracy01,
@@ -243,19 +363,33 @@ namespace StarPawn.Combat.Contracts
         {
         }
 
-        /// <summary>全参构造：连能源一起给出。舰级差异体现在每一个字段上。</summary>
+        /// <summary>全参构造：连能源一起给出，护盾/装甲/过载走缺省。</summary>
         public ResolvedShipStats(float maxHull, float maxSpeedKps, float turnRateDps,
             float gunDamage, float gunRangeKm, float shellVelocityKps, float reloadSeconds,
             float shieldCapacity, float shieldRegenPerSec, float accuracy01,
             float hullRadiusKm, ManeuverProfile maneuver, float maxSpreadDeg, PowerProfile power)
+            : this(maxHull, maxSpeedKps, turnRateDps, gunDamage, gunRangeKm, shellVelocityKps,
+                   reloadSeconds, shieldCapacity, shieldRegenPerSec, accuracy01,
+                   hullRadiusKm, maneuver, maxSpreadDeg, power,
+                   ArmorProfile.Default,
+                   ShieldProfile.DefaultFor(shieldRegenPerSec),
+                   OverloadProfile.DefaultFor(shieldCapacity))
+        {
+        }
+
+        /// <summary>真实配置走这条：装甲、护盾、过载全部显式给出，战斗代码不写任何倍率。</summary>
+        public ResolvedShipStats(float maxHull, float maxSpeedKps, float turnRateDps,
+            float gunDamage, float gunRangeKm, float shellVelocityKps, float reloadSeconds,
+            float shieldCapacity, float shieldRegenPerSec, float accuracy01,
+            float hullRadiusKm, ManeuverProfile maneuver, float maxSpreadDeg, PowerProfile power,
+            ArmorProfile armor, ShieldProfile shield, OverloadProfile overload)
         {
             MaxHull = maxHull; MaxSpeedKps = maxSpeedKps; TurnRateDps = turnRateDps;
             GunDamage = gunDamage; GunRangeKm = gunRangeKm; ShellVelocityKps = shellVelocityKps;
-            ReloadSeconds = reloadSeconds; ShieldCapacity = shieldCapacity;
-            ShieldRegenPerSec = shieldRegenPerSec; Accuracy01 = accuracy01;
+            ReloadSeconds = reloadSeconds; Accuracy01 = accuracy01;
             HullRadiusKm = hullRadiusKm; Maneuver = maneuver;
             MaxSpreadDeg = maxSpreadDeg > 0f ? maxSpreadDeg : DefaultMaxSpreadDeg;
-            Power = power;
+            Power = power; Armor = armor; Shield = shield; Overload = overload;
         }
 
         /// <summary>缺省半径：0.04 × cbrt(MaxHull) → 120/300/800 血对应 0.20/0.27/0.37 km。</summary>
@@ -265,6 +399,15 @@ namespace StarPawn.Combat.Contracts
         /// <summary>测试与假实现用的默认属性。</summary>
         public static ResolvedShipStats Default => new ResolvedShipStats(
             100f, 20f, 30f, 10f, 300f, 3f, 3f, 60f, 2f, 0.9f);
+    }
+
+    /// <summary>
+    /// 按定义 ID 取已解析的战斗属性。应用层只认这个接口，
+    /// 具体是读 content/ships 的 JSON、还是内存表，由 Bootstrap 装配时决定。
+    /// </summary>
+    public interface IShipStatsSource
+    {
+        bool TryGet(string definitionId, out ResolvedShipStats stats);
     }
 
     public sealed class FleetEntry
@@ -409,7 +552,14 @@ namespace StarPawn.Combat.Contracts
         public float Health01;
         public bool IsAlive;
         public float Reload01;
-        public float Shield01;
+        /// <summary>过载缓冲池余量 0..1。护盾的「厚度」是三面 DR，不是这条进度条。</summary>
+        public float Buffer01;
+        /// <summary>护盾是否处于破盾失效（DR = 0、缓冲池锁定 0），失效期结束会自动恢复三成。</summary>
+        public bool ShieldBroken;
+        /// <summary>三面当前有效 DR，已含转向损耗。HUD 据此决定扇面亮度。</summary>
+        public float FaceDrFront;
+        public float FaceDrSide;
+        public float FaceDrRear;
         /// <summary>本舰当前的能量三路分配预设。能源是每舰一份，不是全队共用。</summary>
         public PowerPreset PowerMode;
         /// <summary>剩余能源比例 0..1。HUD 的能源条读它。</summary>

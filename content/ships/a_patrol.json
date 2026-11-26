@@ -22,14 +22,31 @@
       "regenPerSecond": 4.2,
       "propulsionDrainPerSecond": 4.8,
       "turnDrainPerSecond": 0.5,
-      "shieldDrainPerSecond": 0.9,
       "weaponDrainPerShot": 2.5,
       "restartFraction": 0.2
     },
     "gunRange": 180,
     "shellVelocity": 220,
     "reloadSeconds": 3.2,
-    "armor": { "coreMultiplier": 1.0, "outerMultiplier": 0.4, "ricochetAngleDeg": 25 },
+    "gunDamage": 20,
+    "accuracy": 0.85,
+    "armor": { "beamDr": 0.20, "kineticDr": 0.35 },
+    "shield": {
+      "frontDr": 0.85,
+      "sideDr": 0.55,
+      "rearDr": 0.15,
+      "turnLossFactor": 0.25,
+      "regenDelaySeconds": 4.0,
+      "bufferRegenPerSecond": 3.0,
+      "drainPerDamage": 0.12,
+      "recoverFraction": 0.3
+    },
+    "overload": {
+      "threshold": 32,
+      "windowSeconds": 1.5,
+      "bufferCapacity": 80,
+      "breakSeconds": 6.0
+    },
     "hp": 120
   }
 }

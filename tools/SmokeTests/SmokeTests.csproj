@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="../BuildCheck/Application.csproj" />
     <ProjectReference Include="../BuildCheck/Bootstrap.csproj" />
+    <ProjectReference Include="../BuildCheck/Combat_Content.csproj" />
     <ProjectReference Include="../BuildCheck/Combat_Contracts.csproj" />
     <ProjectReference Include="../BuildCheck/Combat_Domain.csproj" />
     <ProjectReference Include="../BuildCheck/Economy_Contracts.csproj" />

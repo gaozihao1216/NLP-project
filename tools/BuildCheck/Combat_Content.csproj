@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>StarPawn.Combat.Content</AssemblyName>
+    <RootNamespace>StarPawn.Combat.Content</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <LangVersion>latest</LangVersion>
+    <NoWarn>CS0169;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Content/MiniJson.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Content/ShipConfigParser.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Content/ShipCatalog.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Combat_Contracts.csproj" />
+    <ProjectReference Include="Foundation.csproj" />
+  </ItemGroup>
+</Project>

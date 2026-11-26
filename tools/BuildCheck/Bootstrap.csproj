@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Application.csproj" />
+    <ProjectReference Include="Combat_Content.csproj" />
     <ProjectReference Include="Combat_Contracts.csproj" />
     <ProjectReference Include="Combat_Domain.csproj" />
     <ProjectReference Include="Economy_Contracts.csproj" />

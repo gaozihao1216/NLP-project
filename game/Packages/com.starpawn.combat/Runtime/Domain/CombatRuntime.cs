@@ -56,12 +56,13 @@ namespace StarPawn.Combat.Domain
                 Attitude = Quat.FromEulerDeg(e.Spawn.Yaw, e.Spawn.Pitch, e.Spawn.Roll),
                 // 战损继承就在这里落地：上一场的完整度直接决定本场初始血量。
                 Hull = e.Stats.MaxHull * e.InheritedHull01,
-                Shield = e.Stats.ShieldCapacity,
+                // 缓冲池开局是满的：护盾的「厚度」来自三面 DR，池只负责吸收饱和。
+                ShieldBuffer = e.Stats.Overload.BufferCapacity,
                 ReloadTimer = 0f,
-                // 能源每舰一份，但阶段一只模拟主舰：护航舰与敌舰按满电处理，省算力也不影响手感。
+                // 能源每舰一份，全舰记账：护航舰与敌舰同样扣电、同样会熄火。
+                // 曾经为省算力只模拟主舰，但那样敌舰永远满推，压制结论不可信（T06）。
                 Power = PowerAllocation.Balanced,
                 Energy = e.Stats.Power.Capacity,
-                SimulatesEnergy = ally && e.Role == SquadRole.Flagship,
                 LockedTargetId = default(EntityId)
             };
             s.PrevPos = s.Pos;
@@ -167,6 +168,10 @@ namespace StarPawn.Combat.Domain
             // 2. 能源按本 tick 的推力档位、操舵输入与护盾需求扣电；耗尽则推进归零。
             //    必须排在 Movement 之前，让物理读到的是已经过能源约束的档位。
             PowerSystem.Step(_w, dt);
+
+            // 2b. 护盾：剪过载窗口、处理破盾恢复、延迟回充。必须排在伤害结算之前，
+            //     否则同一 tick 先被打再回充，玩家会看到「刚回的那点又没了」。
+            ShieldSystem.Step(_w, dt);
 
             // 3. 敌舰 AI 读上一 tick 末状态生成意图。
             SimpleEnemyController.Step(_w);
@@ -277,7 +282,11 @@ namespace StarPawn.Combat.Domain
                     Health01 = s.Health01,
                     IsAlive = s.IsAlive,
                     Reload01 = s.Reload01,
-                    Shield01 = s.Shield01,
+                    Buffer01 = s.Buffer01,
+                    ShieldBroken = s.ShieldBroken,
+                    FaceDrFront = ShieldSystem.EffectiveDr(_w, s, ShieldFace.Front),
+                    FaceDrSide = ShieldSystem.EffectiveDr(_w, s, ShieldFace.Side),
+                    FaceDrRear = ShieldSystem.EffectiveDr(_w, s, ShieldFace.Rear),
                     PowerMode = s.Power.Preset,
                     Energy01 = s.Energy01,
                     PropulsionLocked = s.PropulsionLocked,

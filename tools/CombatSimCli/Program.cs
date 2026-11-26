@@ -6,11 +6,17 @@
 //   --no-lead       不用提前量（用来证明提前量确实有效）
 //   --seconds N     战斗时长上限（默认 300）
 //   --enemies N     敌舰数量（默认 3）
+//   --content DIR   内容根目录（含 ships/ 子目录）。默认向上查找仓库里的 content/
 //   --quiet         只打印结算，不打印逐 0.5 秒状态
+//
+// 舰船属性一律从 content/ships/*.json 读（T01b）。CLI 自己不再留数值表——
+// 以前那份「与 JSON 一一对应」的副本迟早会与 JSON 分叉，而分叉后调参结论全是错的。
 
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
+using StarPawn.Combat.Content;
 using StarPawn.Combat.Contracts;
 using StarPawn.Combat.Domain;
 using StarPawn.Foundation;
@@ -19,23 +25,8 @@ internal static class Program
 {
     private const float Rad2Deg = 57.29578f;
 
-    /// <summary>舰船属性表：与 content/ships/*.json 的 combat 段一一对应。</summary>
-    private static readonly Dictionary<string, ResolvedShipStats> Catalog =
-        new Dictionary<string, ResolvedShipStats>
-        {
-            ["ship.a_patrol"] = new ResolvedShipStats(
-                120f, 32f, 45f, 20f, 180f, 220f, 3.2f, 80f, 3f, 0.85f,
-                0.20f, new ManeuverProfile(4.0f, 45f, 27f, 81f, 180f, 108f, 324f), 1.0f,
-                new PowerProfile(80f, 4.2f, 4.8f, 0.5f, 0.9f, 2.5f, 0.2f)),
-            ["ship.d_destroyer"] = new ResolvedShipStats(
-                300f, 28f, 32f, 40f, 240f, 260f, 4.5f, 160f, 5f, 0.88f,
-                0.27f, new ManeuverProfile(3.5f, 32f, 19f, 58f, 128f, 76f, 230f), 1.0f,
-                new PowerProfile(140f, 3.6f, 4.4f, 0.7f, 1.1f, 4.5f, 0.2f)),
-            ["ship.g_cruiser"] = new ResolvedShipStats(
-                800f, 20f, 20f, 100f, 320f, 300f, 6f, 300f, 8f, 0.92f,
-                0.37f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1.0f,
-                new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 1.3f, 7f, 0.18f)),
-        };
+    /// <summary>从内容目录加载的舰船配置表；Main 里初始化，退出前一直有效。</summary>
+    private static ShipCatalog Catalog;
 
     private static int Main(string[] args)
     {
@@ -44,6 +35,7 @@ internal static class Program
         bool quiet = false;
         int enemyCount = 3;
         float maxSeconds = 300f;
+        string contentRoot = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -54,10 +46,20 @@ internal static class Program
                 case "--quiet": quiet = true; break;
                 case "--enemies": enemyCount = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
                 case "--seconds": maxSeconds = float.Parse(args[++i], CultureInfo.InvariantCulture); break;
+                case "--content": contentRoot = args[++i]; break;
                 default:
                     Console.WriteLine("未知参数: " + args[i]);
                     return 2;
             }
+        }
+
+        string contentError;
+        Catalog = LoadCatalog(contentRoot, out contentError);
+        if (contentError != null)
+        {
+            Console.WriteLine("舰船配置加载失败: " + contentError);
+            Console.WriteLine("（可以用 --content <仓库>/content 指定内容根）");
+            return 2;
         }
 
         var spec = BuildSpec(seed, enemyCount);
@@ -66,6 +68,7 @@ internal static class Program
 
         Console.WriteLine("=== StarPawn 三维战斗仿真 ===");
         Console.WriteLine("seed=" + seed + "  dt=" + spec.FixedStep.ToString("0.####") + "s  lead=" + useLead);
+        Console.WriteLine("舰船配置: " + Catalog.Count + " 型（来自 content/ships）");
         PrintCatalog(spec);
 
         int printEvery = Math.Max(1, (int)Math.Round(0.5f / spec.FixedStep));
@@ -94,6 +97,63 @@ internal static class Program
 
         Console.WriteLine("达到时长上限仍未分出胜负（" + maxSeconds + "s）");
         return 3;
+    }
+
+    /// <summary>
+    /// 加载舰船配置。contentRoot 为空时从当前目录向上找 content/ships（dotnet run 的 cwd
+    /// 通常是仓库根，但 IDE 里可能不是，所以两个起点各找一遍）。
+    /// 一份都读不出来就报错退出——CLI 是调参工具，跑在「以为在读配置」的状态比跑不起来更糟。
+    /// </summary>
+    private static ShipCatalog LoadCatalog(string contentRoot, out string error)
+    {
+        error = null;
+        string root = contentRoot ?? FindContentRoot();
+        if (string.IsNullOrEmpty(root))
+        {
+            error = "找不到 content/ships 目录";
+            return null;
+        }
+
+        string[] errors;
+        var catalog = ShipCatalog.LoadDirectory(Path.Combine(root, "ships"), out errors);
+        if (errors.Length > 0)
+        {
+            error = string.Join("; ", errors);
+            return null;
+        }
+        if (catalog.Count == 0)
+        {
+            error = root + "/ships 里没有可用的舰船配置";
+            return null;
+        }
+        return catalog;
+    }
+
+    private static string FindContentRoot()
+    {
+        var candidates = new List<string>();
+        AddAncestors(candidates, Directory.GetCurrentDirectory());
+        AddAncestors(candidates, AppContext.BaseDirectory);
+        foreach (var dir in candidates)
+        {
+            var ships = Path.Combine(dir, "content", "ships");
+            if (Directory.Exists(ships)) return Path.Combine(dir, "content");
+        }
+        return null;
+    }
+
+    private static void AddAncestors(List<string> list, string start)
+    {
+        try
+        {
+            var dir = new DirectoryInfo(start);
+            for (int i = 0; i < 8 && dir != null; i++, dir = dir.Parent)
+                if (!list.Contains(dir.FullName)) list.Add(dir.FullName);
+        }
+        catch (Exception)
+        {
+            // 起点不存在（例如被删掉的构建目录）就当作没找到，继续试下一个起点。
+        }
     }
 
     private static BattleStartSpec BuildSpec(int seed, int enemyCount)
@@ -134,7 +194,7 @@ internal static class Program
             Role = squad == 0 ? SquadRole.Flagship : SquadRole.Escort,
             SquadIndex = squad,
             Spawn = spawn,
-            Stats = Catalog[defId],
+            Stats = Catalog.Get(defId),
             InheritedHull01 = hull01
         };
 
@@ -151,7 +211,7 @@ internal static class Program
         {
             if (!s.IsAlly || !s.IsAlive) continue;
 
-            var stats = Catalog[s.DefinitionId.ToString()];
+            var stats = Catalog.Get(s.DefinitionId.ToString());
             ShipSnapshot target = NearestEnemy(snap, s);
             if (target == null) continue;
 
@@ -253,6 +313,8 @@ internal static class Program
             " 转速 " + m.YawRateDps.ToString("0") + "/" + m.PitchRateDps.ToString("0") + "/" + m.RollRateDps.ToString("0") + "°/s" +
             " 角加速度 " + m.YawAccelDps2.ToString("0") + "/" + m.PitchAccelDps2.ToString("0") + "/" + m.RollAccelDps2.ToString("0") + "°/s²" +
             " 限速 " + s.MaxSpeedKps.ToString("0") + "km/s" +
+            " 盾 " + s.Shield.FrontDr.ToString("0.00") + "/" + s.Shield.SideDr.ToString("0.00") + "/" + s.Shield.RearDr.ToString("0.00") +
+            " 池 " + s.Overload.BufferCapacity.ToString("0") + "/阈 " + s.Overload.Threshold.ToString("0") +
             " 能源 " + s.Power.Capacity.ToString("0") + "点/再生 " + s.Power.RegenPerSec.ToString("0.0") + "/s");
     }
 
@@ -267,7 +329,7 @@ internal static class Program
                 " pos(" + s.X.ToString("0") + "," + s.Y.ToString("0") + "," + s.Z.ToString("0") + ")" +
                 " v=" + s.Speed.ToString("0.0") + "km/s" +
                 " hp=" + s.Health01.ToString("0.00") +
-                " sh=" + s.Shield01.ToString("0.00") +
+                " 盾=" + (s.ShieldBroken ? "破" : s.Buffer01.ToString("0.00")) +
                 " en=" + s.Energy01.ToString("0.00") + (s.PropulsionLocked ? "(熄火)" : "") +
                 " 转速 " + s.YawRate.ToString("0.0") + "/" + s.PitchRate.ToString("0.0") + "°/s" +
                 (s.LockedTargetId.IsEmpty ? "" : " 锁定 " + s.LockedTargetId));

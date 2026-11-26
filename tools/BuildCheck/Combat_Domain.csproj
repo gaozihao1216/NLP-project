@@ -17,6 +17,8 @@
     <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/CombatRuntime.cs" />
     <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/MovementSystem.cs" />
     <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/PowerSystem.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/ShieldSystem.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/DamageResolver.cs" />
     <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/TargetingSystem.cs" />
     <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/WeaponSystem.cs" />
     <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.combat/Runtime/Domain/Systems/ProjectileSystem.cs" />

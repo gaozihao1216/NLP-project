@@ -2,11 +2,19 @@
 // 伤害单位是点，每帧反算百分比会累积误差；只在导出快照时做一次除法。
 // Stats 是只读引用，不复制、不改写——同一份属性对象会被多艘同型舰共用。
 
+using System.Collections.Generic;
 using StarPawn.Combat.Contracts;
 using StarPawn.Foundation;
 
 namespace StarPawn.Combat.Domain
 {
+    /// <summary>过载滑动窗口的一笔记录：时刻 + 这一击护盾实际吸收掉的伤害。</summary>
+    public struct OverloadLoad
+    {
+        public float Time;
+        public float Absorbed;
+    }
+
     /// <summary>
     /// 能量三路分配。**每舰一份**：不同舰可以各自处在导航/交战档，不存在「全队共用一套」。
     /// 原作里靠一句口令切换，所以这里仍是整体预设，不是实时滑条。
@@ -68,17 +76,27 @@ namespace StarPawn.Combat.Domain
 
         // 生存
         public float Hull;
-        public float Shield;
 
-        // 能源：每舰独立。主舰真正消耗，其它舰按「满电」处理（见 SimulatesEnergy）。
+        // 护盾：三面 DR 是常驻几何状态（不消耗资源），会掉、会回的是过载缓冲池。
+        // 缓冲池只在短窗口内吸收量超阈值时被扣，所以它不会退化成第二条血条。
+        public float ShieldBuffer;
+        /// <summary>破盾失效中：DR = 0、缓冲池锁定 0、回充与窗口累计全部暂停。</summary>
+        public bool ShieldBroken;
+        /// <summary>失效结束时刻（秒，绝对仿真时间）。到时只恢复 RecoverFraction，不是回满。</summary>
+        public float ShieldBrokenUntil;
+        /// <summary>最近一次被命中的仿真时间，用于「4 秒未受击才回充」。初值给负，开战即可回充。</summary>
+        public float LastHitTime = -999f;
+        /// <summary>本窗口已经扣过的超额。不记它，同一笔超额会被重复扣，缓冲池两倍速漏。</summary>
+        public float OverloadDeducted;
+        /// <summary>最近 WindowSeconds 内的 {时刻, 吸收量} 记录，按插入序，超出窗口在 ShieldSystem 里剪掉。</summary>
+        public readonly List<OverloadLoad> OverloadWindow = new List<OverloadLoad>();
+
+        // 能源：每舰独立，**全舰记账**——护航舰与敌舰一样扣电、一样会熄火。
+        // 曾经有过「只算主舰」的简化（SimulatesEnergy 开关），已按 T06 删除：
+        // 敌舰无限电会让「玩家被压制」的结论带假象，也会让饱和战术的收益算错。
         public PowerAllocation Power = PowerAllocation.Balanced;
         /// <summary>当前储能点数（0..Stats.Power.Capacity），不是百分比。</summary>
         public float Energy;
-        /// <summary>
-        /// 是否参与能源消耗模拟。阶段一是「只算主舰」：玩家旗舰扣电，护航舰与敌舰视为反应堆余量充足。
-        /// 放开成全队模拟只需把这个标记在 MakeShip 里改成 true。
-        /// </summary>
-        public bool SimulatesEnergy;
         /// <summary>能源见底导致推进被锁：推力档位已被强制归零，回充到 RestartFraction 才解锁。</summary>
         public bool PropulsionLocked;
 
@@ -98,7 +116,9 @@ namespace StarPawn.Combat.Domain
 
         public Vec3 Forward => Attitude.Forward;
         public float Health01 => Stats != null && Stats.MaxHull > 0f ? Hull / Stats.MaxHull : 0f;
-        public float Shield01 => Stats != null && Stats.ShieldCapacity > 0f ? Shield / Stats.ShieldCapacity : 0f;
+        /// <summary>过载缓冲池余量。0 且未破盾说明刚从零回充；破盾期间恒为 0。</summary>
+        public float Buffer01 => Stats != null && Stats.Overload.BufferCapacity > 0f
+            ? ShieldBuffer / Stats.Overload.BufferCapacity : 0f;
         public float Energy01 => Stats != null && Stats.Power.Capacity > 0f ? Energy / Stats.Power.Capacity : 0f;
         public float EnergyMax => Stats != null ? Stats.Power.Capacity : 0f;
         public float Reload01

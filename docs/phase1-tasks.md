@@ -1,8 +1,24 @@
 # Phase 1 任务顺序
 
-对应设计稿 `docs/weapon-defense-design.md` v0.3。范围就是第 13 节"保留"那一列，
+对应设计稿 `docs/weapon-defense-design.md` v0.4。范围就是第 13 节"保留"那一列，
 不含点防御、引力锚、电子战、永久损坏，也不含武器库扩展（标记枪、制导、重型镭射炮）——
 那部分的落位与排期单列在第 5 节，Phase 1.5 才动。
+
+**进度（2026-11-26，护盾专项 + T01b + T06 已落地）**
+
+| 任务 | 状态 | 说明 |
+| --- | --- | --- |
+| T01 | **完成** | 三份 JSON 补 `shield` / `overload` / `armor` / `gunDamage` / `accuracy`；`ResolvedShipStats` 读全 |
+| T01b | **完成** | `ShipCatalog` + `ShipConfigParser` + `MiniJson`（Combat.Content 程序集）；`CampaignFacade` 与 CLI 的硬编码已删 |
+| T02 | **部分完成** | 护盾相关字段与快照就位（`ShieldBuffer` / `ShieldBroken` / 三面 DR / 窗口）。`Signature01`、`TurretYawDeg`、`ActiveChannel` 随 T11/T10 再做 |
+| T04 | **完成** | `DamageResolver.ResolveHit` 唯一入口；`DamageSystem` 只做扫掠；装甲按通道读配置 |
+| T05 | **完成** | 舰体坐标判面；转向损耗带 `TurnLossEnabled` 开关 |
+| T06 | **完成** | 抗伤耗电（0.12 电/伤、电不够削 DR）+ 全舰记账（`SimulatesEnergy` 已删，所有舰都扣电、都会熄火） |
+| T07 | **完成** | 1.5 s 滑窗 + `deducted` 记账 + 三态状态机（本击不穿透、失效锁池、6 s 后回三成） |
+| T08 | **完成** | 4 s 未受击才回缓冲池，回充归 `ShieldSystem` |
+
+T06 放开全舰记账后，护航舰与敌舰也会熄火，此前基于"敌舰无限电"的压制结论需要重测（见
+`combat-controls.md` 4.4）。这不是副作用，是这条任务本来要修的东西。
 
 ## 0. 排序原则
 
@@ -17,27 +33,32 @@
 
 ## 1. 任务表
 
-| # | 任务 | 产出 | 依赖 | 批 |
-| --- | --- | --- | --- | --- |
-| T01 | 舰体属性扩容 | 三份 JSON + `ResolvedShipStats` 读全 | — | A |
-| T02 | 战斗状态字段与快照 | `CombatShip` / `ShipSnapshot` / `FakeCombatRuntime` 对齐 | T01 | A |
-| T03 | 命令与规则校验 | `SelectWeaponCommand` + `BattleRules` 三条校验 | T02 | A |
-| T04 | `ResolveHit` 唯一入口 | `DamageSystem` 重写，装甲读配置 | T01 | B |
-| T05 | 护盾层：判面 + 转向损耗 | 舰体坐标判面、DR 随角速度衰减 | T04 | B |
-| T06 | 抗伤耗电 | 1 伤 = 0.12 电，电不够按比例削 DR | T05 | B |
-| T07 | 过载缓冲与破盾失效 | 1.5 s 滑窗、池空失效 6 s | T06 | B |
-| T08 | 延迟回盾 | 4 s 未受击才回，从 `PowerSystem` 接管 | T05 | B |
-| T09 | 双通道武器 | 光束 dwell 1.5 s + 投射体 | T04 | C |
-| T10 | 炮塔化 | ±45° 射界、1.5 s 转位、3° 开火门限 | T09 | C |
-| T11 | 暴露信号 | `Signature01` 影响锁定距离、5 s 脱战锁 | T02 | C |
-| T12 | AI 适配 | 选通道、判 `r*`、不贴脸咬尾 | T09 T10 | C |
-| T13 | 能源份额设上限 | 修"永远交战档"（现状 bug，独立可提） | — | C |
-| T14 | 三朝向脚本验证 | CLI 跑出相对收益 + `r*` 实测对照 | T07 T10 T12 | D |
-| T15 | 灰盒场景 | Unity 两块方块 + 盾面扇形，验 H1/H2/H3 | T10 T11 | D |
-| T16 | 文档回填 | `ship-roster` / `combat-controls` 参数与状态 | T14 | D |
+按**执行顺序**排（序），编号保持原值不动——因为 `combat-controls.md` 的缺口清单按编号引用，
+重排编号会让那些引用全部失效。T13 从原计划的批 C 提前到这里，理由见 §2。
 
-T13 插在 C 批但**不依赖任何东西**，随时可单独提交；它在 C 批是因为 T14 的能源曲线要靠它才有意义
-（现在份额只影响效率不设上限，脚本会算出"永远交战档"的最优解，测出来的曲线是假的）。
+| 序 | # | 任务 | 产出 | 依赖 | 批 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | T01 | 舰体属性扩容 | 三份 JSON + `ResolvedShipStats` 读全 | — | A |
+| 2 | T01b | 最小配置读取器 | `ShipCatalog`：JSON → 运行时属性，删掉两处硬编码 | T01 | A |
+| 3 | T13 | 能源份额设上限 | 推进上限绑 `Propulsion` 份额，修"永远交战档" | — | A |
+| 4 | T02 | 战斗状态字段与快照 | `CombatShip` / `ShipSnapshot` / `FakeCombatRuntime` 对齐 | T01 | A |
+| 5 | T03 | 命令与规则校验 | `SelectWeaponCommand` + `BattleRules` 三条校验 | T02 | A |
+| 6 | T04 | `ResolveHit` 唯一入口 | `DamageSystem` 重写，装甲读配置 | T01 | B |
+| 7 | T05 | 护盾层：判面 + 转向损耗 | 舰体坐标判面、DR 随角速度衰减（带开关） | T04 | B |
+| 8 | T06 | 抗伤耗电 + 全舰记账 | 0.12 电/伤；删掉 `SimulatesEnergy` | T05 | B |
+| 9 | T07 | 过载缓冲与破盾失效 | 滑动窗口 + 三态状态机 | T06 | B |
+| 10 | T08 | 延迟回盾 | 4 s 未受击才回缓冲池 | T05 | B |
+| 11 | T09 | 双通道武器 | 光束蓄力结算 + 投射体，共用炮塔 | T04 | C |
+| 12 | T10 | 三维炮塔 | 偏航 ±45° / 俯仰 ±30°，60 °/s | T09 | C |
+| 13 | T11 | 暴露信号 | `Signature01` + AI 侧消费者 | T02 | C |
+| 14 | T12 | AI 适配 | 选通道、判临界速度、不贴脸咬尾、读信号 | T09 T10 T11 | C |
+| 15 | T17 | 护航控制 | `EscortMoveTo` / `EscortAttack` | T03 | C |
+| 16 | T14 | 四组脚本验证 | 静态公式 / 动态窗口 / 策略分化 / 武器差异 | T07 T10 T12 | D |
+| 17 | T15 | 灰盒场景 | 盾面扇形 + 炮塔锥 + 蓄力条 | T10 T11 | D |
+| 18 | T16 | 文档回填 | `ship-roster` / `combat-controls` / 武器稿 | T14 | D |
+
+T13 原本排在批 C，v0.4 提前到批 A 末：能源份额决定推力上限与推进耗电，是所有数值的地基，
+放在最后修等于前面所有曲线都是按错的基础算的。它不依赖任何任务，也可以随时单独提交。
 
 ## 2. 分批细节
 
@@ -50,99 +71,189 @@ T13 插在 C 批但**不依赖任何东西**，随时可单独提交；它在 C 
 三份 `content/ships/*.json` 的 `combat` 段补齐：
 
 ```text
-armor      { beamDr, kineticDr, ricochetAngleDeg }
+armor      { beamDr, kineticDr }
 shield     { frontDr, sideDr, rearDr, regenDelaySeconds, drainPerDamage }
-overload   { threshold, windowSeconds, bufferCapacity, breakSeconds }
-turret     { arcHalfDeg, traverseDegPerSec }
+overload   { threshold, windowSeconds, bufferCapacity, breakSeconds, restoreFraction }
+turret     { yawHalfDeg, pitchHalfDeg, traverseDegPerSec }
 ```
 
-现存的 `coreMultiplier` / `outerMultiplier` 直接改名成 `kineticDr` / `beamDr`——**正因为它们从来没被读过
-（死数据），改名零风险**。语义同时从"乘数"翻成"减伤比例"，这一条必须在 JSON 旁边留注释，
+两处与 v0.3 不同：`ricochetAngleDeg` **删掉**（Phase 1 不做跳弹，留着就是新的死数据）；
+`turret` 从单轴 `arcHalfDeg` 改成**偏航 + 俯仰两个半角**，因为炮塔是两轴的（5.4）。
+`restoreFraction` 是破盾后恢复比例（0.3），它在 5.4 是个规则，必须有配置位。
+
+现存的 `coreMultiplier` / `outerMultiplier` 改名成 `kineticDr` / `beamDr`——**正因为它们从来没被读过
+（死数据），改名零风险**。语义同时从"乘数"翻成"减伤比例"，必须在 JSON 旁边留注释，
 否则下一个人会按乘数去填 0.35 以为能打三折。
 
-初值：`frontDr 0.85 / sideDr 0.55 / rearDr 0.15`、`beamDr 0.20 / kineticDr 0.35`
-（投射体吃厚甲、光束穿薄甲，与护盾强弱互补）、`threshold 120 / window 1.5 / buffer 300 / break 6`、
-`regenDelay 4`、`drainPerDamage 0.12`、`arcHalfDeg 45`、`traverseDegPerSec 60`。
+初值：`frontDr 0.85 / sideDr 0.55 / rearDr 0.15`、`beamDr 0.20 / kineticDr 0.35`、
+`threshold 120 / window 1.5 / buffer 300 / break 6 / restore 0.3`、
+`regenDelay 4`、`drainPerDamage 0.12`、`yawHalfDeg 45 / pitchHalfDeg 30 / traverse 60`。
 
-涉及：三份 JSON、`CombatContracts.cs`、`CampaignFacade.ResolveStats`、`tools/CombatSimCli` 的属性表。
-四处数值必须一致，CLI 的 Catalog 是加载器落地前的临时副本，改一处忘三处是这里最常见的错。
+**T01b 最小配置读取器**（v0.3 漏了这一步，导致"数值放配置"和"四处硬编码"自相矛盾）——**已完成**
+
+T01 只改了 JSON，但运行时实际读的是 `CampaignFacade.ResolveStats()` 和 `CombatSimCli` 的 Catalog
+两份硬编码。不改这两处，T01 的所有字段都只是躺在文件里。
+
+范围刻意做小：
+
+| 项 | 定 | 实际落地 |
+| --- | --- | --- |
+| 位置 | `com.starpawn.combat` 包内（A 的领地），**不碰 application 包** | `Runtime/Content/`，独立程序集 `StarPawn.Combat.Content` |
+| 输入 | `content/ships/*.json` 的 `combat` 段 | 同 |
+| 输出 | `ResolvedShipStats` | `ShipCatalog.TryGet(id)`，实现 `IShipStatsSource` |
+| 不做 | mod 支持、热重载、schema 校验、本地化名 | 同 |
+| 解析 | `System.Text.Json` 或手写解析 | **手写** `MiniJson`：不依赖 Unity 的 API 兼容级别 |
+
+落地后 `CampaignFacade` 与 CLI 的 Catalog 都改成调用它，两份硬编码删除。
+`ship-roster.md` 第 2 节的"配置值 vs 生效值"整节可以删掉——那时只剩一种值。
+
+落地时补的两个细节：
+
+- **缺字段报错，不补缺省。** 报错要带路径（`combat.shield.frontDr 缺失`），否则三份配置里找一个漏字段很费时间。
+- **`ShipCatalog.Builtin` 作为兜底保留。** 内容目录不可达时（Unity content 还没进 StreamingAssets、
+  契约测试没有磁盘）用它，数值必须与 JSON 一致，由 `SmokeTests` 第 28 项逐字段比对守住。
+  它不是第二真源；完整加载器接入后删除。这是"删两份硬编码"与"Unity 里点开战斗不能崩"之间的最小妥协。
+
+**T13 能源份额设上限**（从批 C 提前到这里）
+
+现在的分配只罚效率不设上限（`eff = 0.55 + 1.35 × 份额`），玩家会算出"永远交战档"的最优解。
+T14 的能源曲线全部建立在这个上限上，晚修等于白测。
+
+规则形状：`可用最大推力系数 = f(Propulsion 份额)`，具体系数 [PLACEHOLDER]，在 T14 跑完后定。
+验收：三档预置各跑一遍，必须至少有一档在"满推 + 满转 + 充盾"下 60 s 内见底，否则档位仍然没有取舍。
 
 **T02 战斗状态字段与快照**
 
-`CombatShip` 新增：`BufferPoints`、`ShieldBrokenUntil`、`LastHitTime`、`Signature01`、`TurretYawDeg`、`ActiveChannel`。
+`CombatShip` 新增（比 v0.3 多了窗口与蓄力，因为 T07/T09 需要它们，而只列快照字段无法指导实现）：
 
-`ShipSnapshot` 新增：`Buffer01`、`ShieldBroken`、`Signature01`、`TurretYaw`、`FaceDrFront` / `FaceDrSide` / `FaceDrRear`
-（三个都要，表现层才知道该画哪面亮）。
+| 组 | 字段 |
+| --- | --- |
+| 护盾 | `BufferPoints`、`BufferDeducted`、`ShieldBrokenUntil`、`LastHitTime` |
+| 窗口 | `WindowEntries`（最近 1.5 s 的 `{time, absorbed}`；固定 16 项环形数组，别每帧分配） |
+| 武器 | `ActiveChannel`、`BeamDwellSeconds`、`BeamTargetId` |
+| 炮塔 | `TurretYawDeg`、`TurretPitchDeg`（实际值）、`TurretTargetYaw`、`TurretTargetPitch`（setpoint） |
+| 信号 | `Signature01` |
+
+`ShipSnapshot` 新增：`Buffer01`、`ShieldBroken`、`Signature01`、`TurretYaw` / `TurretPitch`、
+`BeamProgress01`、`FaceDrFront` / `FaceDrSide` / `FaceDrRear`（三个都要，表现层才知道画哪面亮）。
 
 `FakeCombatRuntime` 必须同步填默认值，否则契约测试编译失败——它是故意留着的战略流程替身，
 不是废弃代码，别顺手删。
 
 **T03 命令与规则校验**
 
-`SelectWeaponCommand { ShipId, Channel }`，切通道不进待发射队列，立刻生效。
-`BattleRules` 三条：通道合法、炮塔射界内（这条放到 Step 判，Submit 只判通道与存活）、
-`ValidateHitProfile` 保证每一层 DR 在 [0,1]。
+`SelectWeaponCommand { ShipId, Channel }`。`BattleRules` 三条：通道合法、舰船存活、每层 DR 在 [0,1]。
 
-### 批 B：结算层（一次做完）
+**命令生效时机统一：全部入队，在下一个固定步开始时按入队顺序应用。**
+v0.3 写"切通道立刻生效"是错的——现有 `Submit` 就是入队语义，混一个立刻生效的命令类型，
+同一步内两条命令的先后就依赖调用顺序而非队列顺序，确定性（回滚的基础）会被破坏。
+代价是切武器有最多 33 ms 的延迟，玩家感觉不到。
 
-五个任务共用同一个入口，**中间任何一步都不能单独提交**——半套结算比没有更危险，因为打出来的数字
-既不像旧的也不像新的，调参时无法归因。
+### 批 B：结算层
+
+五个任务共用同一个入口。v0.3 写"中间任何一步都不能单独提交"，这条过严，v0.4 改：
+
+> **每个提交可以单独落地，但必须能编译并通过它自己的断言；整批完成后才做数值验收。**
+
+区别在于"能不能提交"和"能不能拿去调参"是两件事。拆小提交反而更容易定位问题；
+但半套结算打出来的数字既不像旧的也不像新的，此时若开始调平衡，归因一定错。
 
 ```
 ResolveHit(attacker, target, channel, amount, incomingDir):
   1 判面      cosθ = dot(incomingDir, target.Forward)  → front / side / rear
-  2 护盾 DR   dr_s = dr_face × (1 − 0.25 × load)
+              在舰体坐标系做（见下）
+  2 护盾 DR   dr_s = dr_face × (1 − 0.25 × load)      load 由开关决定是否启用
              absorbed = amount × dr_s
              付电：electric = absorbed × drainPerDamage
-                   电不够 → dr_s ×= 可用电/应付电，重算 absorbed
-  3 过载     窗口累计 += amount；超阈值部分入 BufferPoints
-             池空 → ShieldBrokenUntil = now + 6
-  4 装甲 DR   按 channel 分支：光束 0.20 不跳弹；投射体 0.35 且入射角 >30° 追加惩罚
+                   电不够 → dr_s ×= 可用电/应付电，重算 absorbed（顺序不能反）
+  3 过载     窗口累计 += absorbed（不是 amount）；只扣新增超额（5.2 的 delta）
+             池空 → ShieldBrokenUntil = now + 6，本击仍按已算的 dr_s 结算
+  4 装甲 DR   按 channel 分支：光束 0.20 / 投射体 0.35。Phase 1 不做跳弹与入射角
   5 结构     hull −= passed；记 LastHitTime
 ```
 
 T05 的判面要**在舰体坐标系里做**，不是世界坐标：把 `incomingDir` 用姿态四元数的共轭旋转到局部系，
 再看与 `(0,0,1)` 的夹角。世界坐标判面会在舰体滚转后给出错误的档位，而且错得很隐蔽（只有滚转了才错）。
+`combat-controls.md` 5.5 的六向断言就是抓这个的。
 
-T06 和 T08 都要动 `PowerSystem`，所以排在同一个批里连续做完。T08 要把现在 8/s 的连续回充改成
-"`now − LastHitTime > 4 s` 才启动"，这条一改，第 7 节"破防窗口"才有物理意义。
+T06 除了抗伤耗电，还要**把 `SimulatesEnergy` 恒置 true 并删掉这个开关**：敌舰无限电会让
+"玩家被压制"的结论带假象（见 `combat-controls.md` 4.4）。**已删除**：`CombatShip` 不再有这个字段，
+`PowerSystem` / `TryConsumeShot` / `ShieldSystem.RegenRate` / `DamageResolver` 四处分支一并去掉。
+T06 和 T08 都动 `PowerSystem`，排在同一个批里连续做完。T08 把连续回充改成
+"`now − LastHitTime > 4 s` 才启动"，回充对象是**缓冲池**，不是 DR——DR 是常驻的。
 
 ### 批 C：武器与手感
 
-**T09 双通道**：光束是"维持照射 1.5 s 才结算一次伤害"，中途被打断就重来；投射体沿用现有的
-线段-球扫掠与提前量（这套已经标定过，别重写）。两者各有装填计时，不共用。
+**T09 双通道**：形态必须定死，否则 DPS 与过载都没有确定基础（武器稿 7.1）。
 
-**T10 炮塔化**：`TurretYawDeg` 每 tick 向目标方位转，最大 60 °/s，射界 ±45°；
-开火门限从现在的 15° 收到 3°。现有 `BattleRules.ClampToArc` 保留但改用途——从"钳瞄准点到锥边"
-变成"判定炮塔能否覆盖"，因为炮塔补不了角度时应该拒绝开火，而不是把弹打向锥边。
-这是本批唯一会改到既有测试的地方。
+| 项 | 定 |
+| --- | --- |
+| 光束 | **蓄力结算型**：照满 1.5 s 结算 60 伤，中断清零。不是"持续掉血" |
+| 投射体 | 沿用现有线段-球扫掠与提前量（这套已标定过，别重写），伤害 70 |
+| 炮塔 | **两路共用一座**，所以能同时开火但只能打同一目标 |
+| 切换通道 | 打断光束蓄力，清零 |
+| 装填 | 两路独立计时，互不影响 |
+| 耗电 | 光束在蓄力期间持续扣电（这是它的投资），投射体按发扣 |
 
-**T11 暴露信号**：`signal += dt`（开火中）/ `-= 0.5dt`（停火），锁定距离 ×(1+0.3×signal)，
-`signal ≥ 0.6` 时 5 s 内不能主动脱战。只加一个标量，不做探测系统。
+**T10 三维炮塔**：两个轴。只加偏航处理不了上下方目标。
 
-**T12 AI**：三件事。选通道（远带用投射体、近带用光束）、按 `r*` 决定接近还是拉开、
-以及**禁止贴脸咬尾**——追尾时靠高速交叉掠过，不挂在玩家正后方。最后这条不是数值问题，
-是"别让玩家长时间既打不到也跑不掉"。
+- 偏航 ±45°、俯仰 ±30°，相对舰体；射界是这两个范围围出的锥区，不是平面扇面
+- 两轴同时以 60 °/s 逼近 setpoint，耗时取较长轴
+- 开火门限 3°；覆盖不了就**拒绝开火 + 发事件**，不再把弹打向锥边
+- `BattleRules.ClampToArc` 保留但改用途：从"钳瞄准点"变成"判定能否覆盖"
+- 炮塔角相对舰体保存，舰体转时世界指向跟着转、不额外耗时——这是"转身保住射界"与"转身丢掉射界"的分界
+
+这是批 C 里唯一会改到既有测试的地方。
+
+**T11 暴露信号**：`signal += dt`（蓄力中 / 开火中）/ `-= 0.5dt`（停火）。
+**消费者只有 AI 两处**：目标评分 ×(1 + signal)、以及 `signal < 0.2` 时 AI 有概率脱离。
+v0.3 的"锁定距离 ×1.3"与"5 s 不能脱战"都删掉——前者 AI 不经过玩家锁定通道，
+后者对应的静默系统在 Phase 3，没有消费者的规则就是死代码。
+
+**T12 AI 适配**：四件事。
+
+1. 选通道：远距用投射体（有时间躲），近距用光束（必中）
+2. 判临界速度：目标转向压不住时减速环绕，压不住就放弃角度改为正面饱和（武器稿 6.5）
+3. **禁止贴脸咬尾**：追尾靠高速交叉掠过，不挂在玩家正后方——那是罚站不是难度
+4. 读 `Signature01`：高信号目标优先
+
+**T17 护航控制**（v0.3 没有，但不做就无法验包夹）
+
+`EscortMoveTo { ShipId, X, Y, Z }` 与 `EscortAttack { ShipId, TargetId }` 两条命令，
+`4` / `5` 选中护航舰后右键 / 左键下达。**这是 H2 的前置条件**：没有它，"角分离包夹"只能靠 AI 碰巧站位，
+测出来的是 AI 的收益，不是玩家的。
 
 ### 批 D：验证
 
-**T14** 用 CLI 跑四组：
+**T14** 用 CLI 跑六组（对应武器稿 12 节的 A–E，过载单独拆出来）：
 
-| 验的东西 | 期望 | 不成立的样子 |
-| --- | --- | --- |
-| 三朝向相对收益 | 背面 ≈ 正面 ÷5，与第 7 节同序 | 三个朝向差不多（说明判面没生效） |
-| `r*` 与实测一致 | 在 `r*` 内能压住目标偏航，外则被转回正面 | 任何距离都压得住（判面错）或都压不住（角度计算错） |
-| 双舰包夹 vs 正面饱和 | 包夹明显更快但正面饱和也能破 | 正面永远打不动（缓冲池没接上） |
-| 能源曲线 | 顶正面 + 满推 + 充盾约 20 s 见底 | 永不见底（抗伤没付电） |
+| 组 | 验什么 | 期望 | 不成立的样子 |
+| --- | --- | --- | --- |
+| A1 | 三朝向 TTK | 落在武器稿第 7 节 ±20% | 三朝向差不多（判面没生效） |
+| A2 | 过载轮数 | 单舰扣 10；双舰 140/轮、第三轮破 | 单舰也能破盾（口径误用了 amount） |
+| B | 动态维持 | 减速到临界速度后，背向维持 ≥ 8 s | 任何速度都维持（角度算错）或都维持不住（推力约束没实现） |
+| C | 策略分化 | 角分离更快，且正面饱和也有可行解 | 正面永远打不动（缓冲没接上） |
+| D | 武器差异 | 近/远带换通道能量化差距，且无全能武器 | 一把武器全场景占优 |
+| E | 能源曲线 | 顶正面 + 满推 + 充盾约 20 s 见底 | 永不见底（抗伤没付电） |
 
-**T15** 归 B：Unity 里两个方块一个扇形，验 H1（5 s 内看出哪面软）、H2（会不会诱导）、H3（照射有无紧张感）。
-A 只需要保证快照里 `FaceDr*` 和 `ShieldBroken` 是准的。
+**验收目标不是"精确复现某个数字"**，而是这六件事各自成立。v0.3 要求"实测落在 45/86/257 s"
+是把静态推导当真值，而那些数字有六项前提（武器稿第 7 节），本来就复现不出来。
+
+**T15** 归 B，可以**从批 C 就并行开始**：B 用假快照（固定 `FaceDr`、固定蓄力进度）就能做
+盾面扇形、炮塔锥、蓄力条三件表现，不必等 A 把结算写完。A 只需保证快照里
+`FaceDr*` / `ShieldBroken` / `BeamProgress01` 是准的。这是整个计划里唯一一对真正能并行的任务。
+
+验的还是 H1（5 s 内看出哪面软）、H2（会不会主动做角分离）、H3（蓄力有没有紧张感）。
+v0.3 的 H2 是"会不会诱导对方转盾"，绑定舰体后盾不会自己转，改成"会不会主动拉开方位差"。
 
 ## 3. 通用验收（每个任务都要过）
 
-- `tools/BuildCheck/` 21 个工程逐个编译，0 error。
-- **新增 `.cs` 必须手动加进 `Combat_Domain.csproj` 的 `<Compile Include>`**，漏加不报错、只是不生效——
-  这是这个仓库最容易静默失败的地方，比编译错误危险得多。
+- `tools/BuildCheck/` 22 个工程逐个编译，0 error。
+- **编译通过不等于行为正确。** 本机跑不了二进制（0x800711C7），所以每个任务还需要一条"行为断言"——
+  要么写进 SmokeTests，要么写进 CLI 的输出。没有断言的改动等于没验，第 6 节是执行清单。
+- **新增 `.cs` 必须手动加进对应的 csproj `<Compile Include>`**，漏加不报错、只是不生效——
+  这是这个仓库最容易静默失败的地方，比编译错误危险得多。`Combat.Content` 三个文件已在
+  `tools/BuildCheck/Combat_Content.csproj` 里登记。
 - `Combat_Domain` 是 `noEngineReferences`，不能用 `UnityEngine.*`，向量一律用契约里的 `Vec3`。
 - `SmokeTests` 与 `CombatSimCli` 同批编译过。
 
@@ -155,7 +266,7 @@ A 只需要保证快照里 `FaceDr*` 和 `ShieldBroken` 是准的。
 | 持续损坏子系统 | Phase 3。永久损坏叠加能源枯竭会形成极强的失败滚雪球，先做可恢复的 |
 | 探测/静默系统 | Phase 3。Phase 1 的暴露只到一个标量 |
 | 武器库扩展 | Phase 1.5，见第 5 节。Phase 1 只验"两条投送的差异玩家能不能感知" |
-| 真实配置加载器 | 属 B 的活。加载器落地前，四处硬编码数值靠 T01 的注释对齐 |
+| 真实配置加载器 | 属 B 的活。但"最小读取器"（T01b）已由 A 落地：现在 JSON 是唯一真源，只剩 `ShipCatalog.Builtin` 兜底 |
 
 ## 5. 武器库扩展：分层判定与排期
 
@@ -205,9 +316,15 @@ A 只需要保证快照里 `FaceDr*` 和 `ShieldBroken` 是准的。
 | 阶段 | 内容 | 准入条件 |
 | --- | --- | --- |
 | Phase 1（现在） | 不动。两条通道够验核心循环 | — |
-| **Phase 1.5** | A1 标记枪 + 有限制导 + W1 重型规格 | P1 灰盒 H1/H2 通过，且 T14 的三档相对收益玩家能实际感知 |
-| Phase 2 | 点防御、引力锚、规格扩展（重型 / 速射两档） | P1.5 验证完 |
+| **Phase 1.5 第一步** | **只做 A1 标记枪**（它补的是光束缺技能轴这个空洞） | P1 灰盒 H1/H2 通过，且 T14 的收益确实分化 |
+| Phase 1.5 第二步 | 有限制导（依赖标记枪已验证） | 标记时长三档差 5 倍以上，且玩家真的会为了标记去换角度 |
+| Phase 1.5 第三步 | W1 重型规格（镭射炮） | 制导稳定后再做，避免同时改两件事 |
+| Phase 2 | 点防御、引力锚、规格扩展（重型 / 速射两档） | P1.5 全部验证完 |
 | Phase 3 | 电子战、永久损坏 | — |
+
+**一次只加一件。** v0.3 把标记枪、制导、重型光束写成一批，那是把三个未验证的假设捆在一起：
+如果包夹收益没起来，分不清是标记太弱、制导太强，还是重型光束挤掉了别的选择。
+拆成三步，每步都有自己的失败信号，出问题时能归因到具体那一件。
 
 准入写成"玩家能感知"而不是"我觉得可以了"，是因为数值上算不出平衡：
 4 投送 × 3 朝向 = 12 格，再叠标记与制导的交互，纸面推不动，必须先有 T14 的脚本当算力。
@@ -252,3 +369,29 @@ HUD 更花、平衡更难、决策没多。这条判断留给 T15 的灰盒结�
 5.2 与 5.4 里的数字全部 **[PLACEHOLDER]**，因为标记枪要读的 `DR_eff` 是 T05 才产出的。
 回填顺序：T05 落地 → 用 CLI 跑一次标记时长 → 确认正/侧/后三档真的差 5 倍以上 → 再定制导追踪上限。
 在此之前不要把这几个数字写进 JSON。
+
+## 6. 测试在哪执行
+
+v0.3 缺这一节，等于默认"能编译就等于验证通过"，而本机的情况正好相反：
+应用控制策略（0x800711C7）阻止执行新生成的二进制——`dotnet build` 通过，`dotnet run` 被拒。
+所以编译只是第一道闸。
+
+| 项 | 要求 |
+| --- | --- |
+| 机器 | 另一台 Windows 或 CI。装 .NET 8 SDK 即可，**不需要 Unity** |
+| 冒烟 | `cd tools/SmokeTests && dotnet run`（28 个场景块，含配置加载与内置镜像一致性） |
+| 仿真 | `dotnet run --project tools/CombatSimCli -- --seed N`（舰体数值从 `content/ships` 读；路径找不到时用 `--content <仓库>/content`） |
+| 记录 | 每次结果记：命令、种子、git hash、关键数字（TTK / 破盾轮数 / 见底时间） |
+| 回填 | 结果回填武器稿第 7 节与 `ship-roster` 第 3 节，标注「实测」而非「复算」 |
+
+### 在此之前，所有数字都得标来源
+
+现在文档里的数值分三种来源，混起来会让人以为已经验过：
+
+| 来源 | 例子 | 可信度 |
+| --- | --- | --- |
+| C# 编译通过 | 所有"0 error" | 只说明语法与类型正确，**不说明行为正确** |
+| 等效二维模型复算 | 69–129 s、命中率 1%、滚动阻力曲线 | 只验公式，未验三维与 Unity |
+| 真实执行 | 暂无 | 换机跑完才有 |
+
+任何一处把前两种写成"实测"，都会让下一个人拿错误的基线去调参。这是本仓库最容易犯、也最难发现的错。

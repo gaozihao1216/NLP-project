@@ -4,6 +4,7 @@
   "references": [
     "StarPawn.Application",
     "StarPawn.Combat.Contracts",
+    "StarPawn.Combat.Content",
     "StarPawn.Combat.Domain",
     "StarPawn.Economy.Contracts",
     "StarPawn.Economy.Domain",

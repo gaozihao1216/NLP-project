@@ -22,14 +22,31 @@
       "regenPerSecond": 3.6,
       "propulsionDrainPerSecond": 4.4,
       "turnDrainPerSecond": 0.7,
-      "shieldDrainPerSecond": 1.1,
       "weaponDrainPerShot": 4.5,
       "restartFraction": 0.2
     },
     "gunRange": 240,
     "shellVelocity": 260,
     "reloadSeconds": 4.5,
-    "armor": { "coreMultiplier": 1.0, "outerMultiplier": 0.4, "ricochetAngleDeg": 28 },
+    "gunDamage": 40,
+    "accuracy": 0.88,
+    "armor": { "beamDr": 0.20, "kineticDr": 0.35 },
+    "shield": {
+      "frontDr": 0.85,
+      "sideDr": 0.55,
+      "rearDr": 0.15,
+      "turnLossFactor": 0.25,
+      "regenDelaySeconds": 4.0,
+      "bufferRegenPerSecond": 5.0,
+      "drainPerDamage": 0.12,
+      "recoverFraction": 0.3
+    },
+    "overload": {
+      "threshold": 64,
+      "windowSeconds": 1.5,
+      "bufferCapacity": 160,
+      "breakSeconds": 6.0
+    },
     "hp": 300
   },
   "note": "航行与装甲参数小说未给出，原型阶段按手感调平衡"

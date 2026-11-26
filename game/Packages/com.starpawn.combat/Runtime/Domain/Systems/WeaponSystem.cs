@@ -78,6 +78,7 @@ namespace StarPawn.Combat.Domain.Systems
                     PrevPos = s.Pos,
                     Vel = s.Velocity + dir * s.Stats.ShellVelocityKps,
                     Damage = s.Stats.GunDamage,
+                    Channel = DamageChannel.Kinetic,
                     MaxRangeKm = s.Stats.GunRangeKm,
                     Alive = true
                 };

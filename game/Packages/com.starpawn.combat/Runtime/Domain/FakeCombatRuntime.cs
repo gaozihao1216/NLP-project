@@ -61,7 +61,11 @@ namespace StarPawn.Combat.Domain
                 X = e.Spawn.X, Y = e.Spawn.Y, Z = e.Spawn.Z,
                 Yaw = e.Spawn.Yaw, Pitch = e.Spawn.Pitch, Roll = e.Spawn.Roll,
                 Speed = 0f, Health01 = e.InheritedHull01, IsAlive = true, Reload01 = 1f,
-                Shield01 = 1f, PowerMode = PowerPreset.Balanced, Energy01 = 1f
+                Buffer01 = 1f, ShieldBroken = false,
+                FaceDrFront = e.Stats.Shield.FrontDr,
+                FaceDrSide = e.Stats.Shield.SideDr,
+                FaceDrRear = e.Stats.Shield.RearDr,
+                PowerMode = PowerPreset.Balanced, Energy01 = 1f
             };
         }
 
@@ -128,10 +132,10 @@ namespace StarPawn.Combat.Domain
             if (!_started || _result != null) return;
             _snapshot.Clock = _snapshot.Clock.Advance();
 
-            // 护罩随能量投入恢复；交战档把更多能量给武器，护罩恢复慢。
+            // 假实现没有伤害结算，只让缓冲池跟着能量投入动一下，UI 流程能看出变化。
             float regen = _power.Shield * 4f;
             foreach (var s in _snapshot.Ships)
-                if (s.IsAlive) s.Shield01 = Math.Min(1f, s.Shield01 + regen * _spec.FixedStep);
+                if (s.IsAlive) s.Buffer01 = Math.Min(1f, s.Buffer01 + regen * _spec.FixedStep);
 
             if (_snapshot.Clock.Tick < 5) return;
 
@@ -194,7 +198,9 @@ namespace StarPawn.Combat.Domain
                     Vx = s.Vx, Vy = s.Vy, Vz = s.Vz, Speed = s.Speed,
                     PitchRate = s.PitchRate, YawRate = s.YawRate, RollRate = s.RollRate,
                     Health01 = s.Health01, IsAlive = s.IsAlive, Reload01 = s.Reload01,
-                    Shield01 = s.Shield01, PowerMode = s.PowerMode
+                    Buffer01 = s.Buffer01, ShieldBroken = s.ShieldBroken,
+                    FaceDrFront = s.FaceDrFront, FaceDrSide = s.FaceDrSide, FaceDrRear = s.FaceDrRear,
+                    PowerMode = s.PowerMode, Energy01 = s.Energy01
                 };
             }
             var proj = new ProjectileSnapshot[_snapshot.Projectiles.Length];

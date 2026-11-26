@@ -14,8 +14,8 @@ namespace StarPawn.Combat.Domain.Systems
     {
         public static void Step(CombatWorld w, float dt)
         {
-            // 护盾回充不在这里——它是一条耗电通路，统一由 PowerSystem 处理。
-            // 这里只负责命中判定与扣血。
+            // 这里只做「谁打中了谁」的几何判定。扣多少血、护盾挡几成、过载怎么算，
+            // 一律交给 DamageResolver——命中判定与伤害结算分开，才能在不碰扫掠代码的前提下改防御。
 
             for (int i = 0; i < w.Shells.Count; i++)
             {
@@ -66,7 +66,17 @@ namespace StarPawn.Combat.Domain.Systems
                 else if (hitShip != null)
                 {
                     shell.Alive = false;
-                    ApplyDamage(w, shell, hitShip);
+
+                    // 威胁来向 = 弹丸相对该舰的飞行方向取反。用相对速度而不是绝对速度：
+                    // 舰速 30 km/s、弹速 220–300 km/s，忽略舰速会让判面偏出几度，
+                    // 恰好落在扇区边界上时正面会被算成侧面。
+                    Vec3 relVel = shell.Vel - hitShip.Velocity;
+                    Vec3 incoming = relVel.SqrLength > 1e-8f
+                        ? -relVel.Normalized
+                        : (shell.PrevPos - hitShip.Pos).Normalized;
+
+                    DamageResolver.ResolveHit(w, hitShip, shell.OwnerId,
+                        shell.Channel, shell.Damage, incoming);
                 }
             }
 
@@ -75,31 +85,6 @@ namespace StarPawn.Combat.Domain.Systems
             for (int i = 0; i < w.Shells.Count; i++)
                 if (w.Shells[i].Alive) w.Shells[write++] = w.Shells[i];
             if (write < w.Shells.Count) w.Shells.RemoveRange(write, w.Shells.Count - write);
-        }
-
-        private static void ApplyDamage(CombatWorld w, Projectile shell, CombatShip ship)
-        {
-            float remain = shell.Damage;
-
-            // 先扣护盾，溢出进舰体。
-            if (ship.Shield > 0f)
-            {
-                float absorbed = Math.Min(ship.Shield, remain);
-                ship.Shield -= absorbed;
-                remain -= absorbed;
-            }
-
-            if (remain > 0f)
-            {
-                ship.Hull -= remain;
-                if (ship.Hull < 0f) ship.Hull = 0f;
-            }
-
-            if (!ship.IsAlive)
-                w.Emit("Destroyed", shell.OwnerId, ship.Id, "击沉");
-            else
-                w.Emit("Hit", shell.OwnerId, ship.Id,
-                    "舰体 " + ship.Health01.ToString("0.00") + " 护盾 " + ship.Shield01.ToString("0.00"));
         }
 
         /// <summary>

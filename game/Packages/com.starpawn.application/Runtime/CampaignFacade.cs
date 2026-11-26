@@ -27,6 +27,11 @@ namespace StarPawn.Application
         public IRelationsService Relations;
         public INarrativeRuntime Narrative;
         public ICombatRuntime Combat;
+        /// <summary>
+        /// 舰体配置源（content/ships 解析结果）。进战斗前由它解析属性，
+        /// 应用层不认识 JSON，也不留第二份数值表。Bootstrap 装配，测试可注入内置表。
+        /// </summary>
+        public IShipStatsSource Ships;
         public IStrategicAdvisor Advisor;
         public ITacticalHintProvider TacticalHints;
         /// <summary>任务奖励来源。为空时用代码里的安全默认值。</summary>
@@ -175,7 +180,7 @@ namespace StarPawn.Application
                     SquadIndex = j % BattleRules.MaxSquads,
                     // 敌舰摆在 +Z 前方 260 km、横向散开，正面朝向玩家；不再用旧的 (300,120) 斜上方点位。
                     Spawn = new SpawnPoint(-60f + j * 60f, 0f, 260f, 180f, 0f, 0f),
-                    Stats = ResolvedShipStats.Default,
+                    Stats = StatsFor("ship.a_patrol"),
                     InheritedHull01 = 1f
                 });
 
@@ -210,42 +215,33 @@ namespace StarPawn.Application
             }
         }
 
-        // 机动与能源参数的临时数值同步：与 content/ships 的 combat.maneuver / combat.power 保持一致。
-        // 真正的配置加载器是 B 的第二周任务，落地后这几行与本方法一起删掉。
-        private static readonly ManeuverProfile CruiserManeuver =
-            new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f);
-
-        private static readonly ManeuverProfile CorvetteManeuver =
-            new ManeuverProfile(4.0f, 45f, 27f, 81f, 180f, 108f, 324f);
-
-        private static readonly PowerProfile CruiserPower =
-            new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 1.3f, 7f, 0.18f);
-
-        private static readonly PowerProfile CorvettePower =
-            new PowerProfile(80f, 4.2f, 4.8f, 0.5f, 0.9f, 2.5f, 0.2f);
-
         /// <summary>
-        /// 由持久状态解析战斗属性。当前用固定基线，接内容加载后从 content/ships/ 读并按立方律换算。
-        /// 半径、机动与能源参数必须显式给：它们决定舰级手感，不能靠血量或转速反推。
+        /// 由持久状态解析战斗属性。数值全部来自 content/ships 的配置（经 IShipStatsSource），
+        /// 这里只做「舰型 ID → 配置」的映射，不再保留第二份参数表（T01b 已删）。
         /// </summary>
-        private static ResolvedShipStats ResolveStats(OwnedShipState ship)
+        private ResolvedShipStats ResolveStats(OwnedShipState ship)
         {
-            bool flagship = ship.AssignedRole == FleetSquadRole.Flagship;
-            return new ResolvedShipStats(
-                maxHull: flagship ? 800f : 200f,
-                maxSpeedKps: flagship ? 20f : 32f,
-                turnRateDps: flagship ? 20f : 45f,
-                gunDamage: flagship ? 100f : 20f,
-                gunRangeKm: flagship ? 320f : 180f,
-                shellVelocityKps: flagship ? 300f : 220f,
-                reloadSeconds: flagship ? 6f : 3.2f,
-                shieldCapacity: flagship ? 300f : 80f,
-                shieldRegenPerSec: flagship ? 8f : 3f,
-                accuracy01: flagship ? 0.92f : 0.85f,
-                hullRadiusKm: flagship ? 0.37f : 0.20f,
-                maneuver: flagship ? CruiserManeuver : CorvetteManeuver,
-                maxSpreadDeg: ResolvedShipStats.DefaultMaxSpreadDeg,
-                power: flagship ? CruiserPower : CorvettePower);
+            string definitionId = ship.DefinitionId.ToString();
+            ResolvedShipStats stats;
+            if (_s.Ships != null && _s.Ships.TryGet(definitionId, out stats)) return stats;
+
+            // 舰队里的舰型还没进配置时，按角色退到已知舰型。显式回退而不是静默给默认属性：
+            // 默认属性的血量与机动都是占位值，混进战斗会让数值结论失去意义。
+            string fallback = ship.AssignedRole == FleetSquadRole.Flagship ? "ship.g_cruiser" : "ship.a_patrol";
+            return StatsFor(fallback, definitionId);
+        }
+
+        /// <summary>取一份舰体配置；取不到直接抛出——缺配置是装配错误，不能拖到战斗中途才暴露。</summary>
+        private ResolvedShipStats StatsFor(string definitionId, string requestedBy = null)
+        {
+            if (_s.Ships == null)
+                throw new InvalidOperationException("舰船配置源未装配：GameServices.Ships 为空");
+
+            ResolvedShipStats stats;
+            if (_s.Ships.TryGet(definitionId, out stats)) return stats;
+
+            throw new InvalidOperationException("没有舰船配置: " + definitionId +
+                (string.IsNullOrEmpty(requestedBy) ? "" : "（请求方 " + requestedBy + "）"));
         }
 
         // ---- 战斗会话控制：表现层只通过门面推进，不直接持有 Combat ----

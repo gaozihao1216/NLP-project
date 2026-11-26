@@ -24,7 +24,7 @@ docs/
   storyline.md                      剧情线与任务日志设计（单一事实来源）
 ```
 
-一共 21 个 `.asmdef`。纯 C# 包（Foundation、各 Contracts/Domain、Application、Infrastructure）全部设 `noEngineReferences: true`，编译期就无法引用 UnityEngine——这是"规则与表现分离"的硬约束，不靠口头约定。
+一共 22 个 `.asmdef`。纯 C# 包（Foundation、各 Contracts/Domain、Combat.Content、Application、Infrastructure）全部设 `noEngineReferences: true`，编译期就无法引用 UnityEngine——这是"规则与表现分离"的硬约束，不靠口头约定。
 
 ## 并行开发怎么开始
 
@@ -136,7 +136,7 @@ HP       = baseHP  × (L / L_ref)³ × roleFactor
 
 ## 编译与验证说明
 
-已安装 .NET 8 SDK，`tools/BuildCheck/` 下按 21 个 asmdef 生成了对应的 csproj，**全部 21 个程序集实际编译通过**。`tools/SmokeTests/` 是关键契约测试（18 个场景块：重复结算、中途失败回滚、剧情重复选择、跨节点选项、战损继承、快照深拷贝、随机源上界、内容校验、内容驱动奖励、航行事务、战斗契约校验、剧情失败回滚、星系管辖与缴获、战斗结果深拷贝、四元数欧拉往返、扫掠碰撞、反喷回正、提前量与真实战斗推进）。
+已安装 .NET 8 SDK，`tools/BuildCheck/` 下按 22 个 asmdef 生成了对应的 csproj，**全部 22 个程序集实际编译通过**。`tools/SmokeTests/` 是关键契约测试（28 个场景块：契约与回滚流程、三维运动与提前量、能源耗尽与滞回、护盾判面/过载/破盾/回充、全舰记账、配置加载与内置镜像一致性）。
 
 本机应用控制策略阻止新生成 DLL 的加载，测试**编译通过但未能执行**。换一台允许执行的机器：
 
@@ -148,7 +148,7 @@ Unity 侧：用 Unity 2021.3 打开 `game/` 目录。`StarPawn.Presentation` 目
 
 ## 两人并行前的底座加固（2026-11-23）
 
-先确认编译：21 个 BuildCheck 工程与 SmokeTests 工程全部实际编译通过。随后补了三处：
+先确认编译：22 个 BuildCheck 工程与 SmokeTests 工程全部实际编译通过。随后补了三处：
 
 **1. 战斗契约自包含与共享校验。** `BattleStartSpec` 增加 `MissionId`、`OriginSystemId`、`TargetSystemId`，结算不再依赖门面当时的可变字段；`FleetEntry.SquadIndex` 限定 0..3。新增 `BattleRules.ValidateSpec` / `ValidatePower`，Application 与 Combat 共用同一份规则——四分队上限、负能量投入、重复舰 ID、非法战损都在进入战斗前拦下。`TryGetResult` 改为深拷贝，调用方改数组不会污染内部结果。
 
@@ -258,7 +258,7 @@ u = clamp(u, -1, 1)
 - 炮弹世界速度 = 舰速 + 炮口方向 × 弹速（追击更快、迎头更慢）。
 - 命中用**三维线段 vs 球、按两体相对位移**做扫掠：弹速 220 km/s × 1/30 s = 7.3 km/tick，
   舰体半径只有 0.2–0.37 km，点检测 100% 穿透；舰速 32 km/s 也有 1.07 km/tick，同样漏判。
-  先判陨石再判舰船，取最近命中；护盾先扣，溢出进舰体。
+  先判陨石再判舰船，取最近命中；命中只负责回答「谁打到了谁」，扣多少血一律走 `DamageResolver`（见第 10 节）。
 
 ### 5. 提前量必须用相对速度（一个会毁掉整场战斗的坑）
 
@@ -277,10 +277,13 @@ relVel = targetVel - shooterVel
 
 ### 6. 执行顺序与确定性
 
-`Step()` 固定顺序：角速度输入归零 → 应用待处理命令 → **能源结算** → 敌舰 AI → 运动 → **锁定解算** → 武器 → 弹道 → 伤害 → 胜负 → 时钟推进。
+`Step()` 固定顺序：角速度输入归零 → 应用待处理命令 → **能源结算** → **护盾 tick** → 敌舰 AI → 运动 → **锁定解算** → 武器 → 弹道 → 伤害 → 胜负 → 时钟推进。
 
 能源排在运动之前的理由：`ThrustSetpoint` 与操舵输入已经由命令写好了，先按「这一 tick 打算怎么飞」扣电，
 再决定推力是否被能源锁死；这样 `MovementSystem` 读到的档位一定是已经过能源约束的值，物理侧不需要知道能源存在。
+
+护盾 tick 夹在能源与伤害之间：它要剪过载窗口、处理破盾恢复、按 4 s 延迟回充。
+放在伤害之前，同一 tick 内就不会出现「先被打再回充」导致玩家看到刚回的那点又没了。
 
 锁定解算紧跟在运动之后：位置与速度是本 tick 最新的，解出的提前量不会比 HUD 慢一帧。
 
@@ -293,8 +296,9 @@ relVel = targetVel - shooterVel
   再逐 0.5 秒打印位置/姿态/速度/血盾/能源/锁定，最后输出 `BattleResult`。
   参数 `--seed`、`--no-lead`、`--enemies`、`--seconds`、`--quiet`。
   默认走目标锁定（仿真解提前量），`--no-lead` 改成手动瞄目标当前位置——这是「提前量有效」的对照组。
-- `tools/SmokeTests` 现有 21 个场景块，后三个专测本轮的物理与能源：能源耗尽锁推进/回充恢复、
-  推力沿舰体主轴（偏航 90° 后加速度必须落在 +X）、锁定解提前量与三类拒绝（超距/友军/空目标）。
+- `tools/SmokeTests` 现有 26 个场景块。后八个专测本轮的物理、能源与护盾：能源耗尽锁推进/回充恢复、
+  推力沿舰体主轴（偏航 90° 后加速度必须落在 +X）、锁定解提前量与三类拒绝（超距/友军/空目标），
+  以及判面三档、转向损耗开关、电不足削 DR、双舰三轮破盾、破盾那一击不穿透、6 s 后只回三成、4 s 延迟回充。
 - 本机应用控制策略（0x800711C7，Defender 拦截新生成二进制）仍然阻止执行，CLI 与 SmokeTests **只能编译不能运行**。
   换机执行：`dotnet run --project tools/CombatSimCli`、`cd tools/SmokeTests && dotnet run`。
 - 为确认数值可用，用等效的二维模型复算了同一场 2v3：6 个随机种子全部取胜，用时 69–129 s，无僵局；
@@ -305,31 +309,31 @@ relVel = targetVel - shooterVel
   | --- | --- |
   | 纯满推 | 103 s |
   | 满推 + 三轴满转 | 58 s |
-  | 满推 + 满转 + 护盾回充 | 36 s |
-  | 再加持续开火（6 s 一发） | 25 s |
   | 半推巡航 | 不会见底 |
 
-  即：正常交战不会因为能源停摆，只有长时间极限机动或边打边充盾才会被逼到熄火——这正是它该有的压力。
+  抗伤耗电另计（1 点被挡掉的伤害 = 0.12 电），见第 10 节；它不进这张表，因为取决于对方打得多狠。
 
-### 8. 能源：每舰一份，阶段一只算主舰
+  即：正常交战不会因为能源停摆，只有长时间极限机动或边打边扛才会被逼到熄火——这正是它该有的压力。
+
+### 8. 能源：每舰一份，全舰记账
 
 **为什么要改**：早先 `PowerAllocation` 挂在 `CombatWorld` 上，是全场共用的一条口令；而推进系统根本没读它，
 `Power.Propulsion` 是个死参数。现在能源归每艘舰自己（`CombatShip.Power` / `Energy`），
 `PowerAllocationCommand` 必须带 `ShipId`，不同舰可以各自处在导航/交战档。
 
-**四路耗电**，全部由舰体配置的 `power` 块给出（`content/ships/*.json`）：
+**三路持续耗电**，全部由舰体配置的 `power` 块给出（`content/ships/*.json`）：
 
 ```text
 eff    = 0.55 + 1.35 × Propulsion                // 分给推进的电越多，每单位推力越省
 drain  = PropulsionDrain × |thrust| / eff         // 反推 ×1.4（喷口效率低）
        + TurnDrain × (|yaw|+|pitch|+|roll|)/3 / eff
-       + ShieldDrain × (Shield × 3)               // 只在回充时计
 Energy += (Regen − drain) × dt                    // 夹到 [0, Capacity]
 开火另扣 WeaponDrainPerShot，扣不出来就打不出去（事件 PowerLow）
 ```
 
-护盾回充从 `DamageSystem` 移到了 `PowerSystem`：它是一条耗电通路，不该散落在命中判定里。
-回充速率 = `ShieldRegenPerSec × Shield×3 × 供电系数`，能量低于容量 5% 时按比例衰减到 0（没电就别想充盾）。
+护盾的电费**不在这里**：它按「被挡掉的伤害」计，1 点 = 0.12 电，落在 `DamageResolver` 里（第 10 节）。
+早先那套「回充时按秒扣电」的做法已删掉——同一件事在两个地方收费会两头都调不准，
+而且 `shieldDrainPerSecond` 会变成没人读的死配置，正是本文档反复提醒的那类问题。
 
 **耗尽与恢复**（滞回，避免每 tick 抖一下）：
 
@@ -342,16 +346,18 @@ Energy ≥ Capacity×Restart   → 解锁，事件 PowerRestored
 `MovementSystem` 另外再判断一次 `PropulsionLocked`，双保险。滑行期间速度不变（真空无阻力），
 所以熄火惩罚的是**机动**而不是「掉速」。
 
-**阶段一只模拟主舰**：`SimulatesEnergy = ally && Role == Flagship`，护航舰与敌舰按满电处理。
-放开成全队模拟只需改 `MakeShip` 里这一行——模型本身已经是每舰的，不需要重构。
+**全舰记账（T06）**：曾经有过「只算主舰」的开关 `SimulatesEnergy`，护航舰与敌舰按满电处理。
+已删除——敌舰无限电会让「玩家被压制」的结论带假象，也让饱和战术的收益算错。
+现在 `PowerSystem` / `TryConsumeShot` / `ShieldSystem.RegenRate` / `DamageResolver` 都对所有舰一视同仁，
+每艘舰开局满电、按自己的份额扣电、耗尽了都会熄火。
 
 各舰数值：
 
-| 舰型 | 容量 | 再生/s | 满推耗电/s | 转向/s | 充盾/s | 每发 | 重启阈值 |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| 巡逻艇 | 80 | 4.2 | 4.8 | 0.5 | 0.9 | 2.5 | 20% |
-| 驱逐舰 | 140 | 3.6 | 4.4 | 0.7 | 1.1 | 4.5 | 20% |
-| 巡洋舰 | 120 | 3.2 | 4.4 | 0.9 | 1.3 | 7.0 | 18% |
+| 舰型 | 容量 | 再生/s | 满推耗电/s | 转向/s | 每发 | 重启阈值 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 巡逻艇 | 80 | 4.2 | 4.8 | 0.5 | 2.5 | 20% |
+| 驱逐舰 | 140 | 3.6 | 4.4 | 0.7 | 4.5 | 20% |
+| 巡洋舰 | 120 | 3.2 | 4.4 | 0.9 | 7.0 | 18% |
 
 ### 9. 目标锁定
 
@@ -364,3 +370,114 @@ Energy ≥ Capacity×Restart   → 解锁，事件 PowerRestored
 - `Submit` 阶段就拒绝非法锁定（`LOCK_OUT_OF_RANGE` / `FRIENDLY_TARGET` / `TARGET_DEAD` / `NO_SUCH_TARGET`），
   不让错误命令进入待处理队列——否则玩家看不到失败原因。
 - AI 不走这条通道（它自己算提前量），所以锁定是纯玩家侧的体验改进，不改变敌方行为与已标定的战斗节奏。
+
+### 10. 护盾：常驻减伤 + 过载缓冲（2026-11-26）
+
+设计依据见 `docs/weapon-defense-design.md` 第 5、6 节。这一节的目的是让人能从代码反查出规则，
+不是重复设计稿的论证过程。
+
+**为什么不是「护盾池」**：池做对了按朝向分配也能有方向性，但它会退化成第二条血条，
+玩家看到的是「护盾 62%」而不是「他右舷是软的」。所以护盾拆成两层：
+
+| 层 | 谁来算 | 会不会掉 |
+| --- | --- | --- |
+| 减伤 DR（正面 0.85 / 侧面 0.55 / 背面 0.15） | `ShieldSystem.EffectiveDr` | 不掉，是常驻几何状态 |
+| 过载缓冲池（300 点） | `ShieldSystem.AccumulateOverload` | 会掉，但只在短窗口超额时掉 |
+
+**唯一入口**：`DamageResolver.ResolveHit(world, target, source, channel, amount, incomingDir)`。
+顺序固定为 判面 → 护盾 DR（电不够先削）→ 过载 → 装甲 → 结构。`DamageSystem` 只做扫掠命中，
+算出 `incomingDir` 就交给它——命中判定与伤害结算分开，才能在不碰扫掠代码的前提下改防御。
+
+**判面**：`incomingDir` 是「从目标指向威胁来源」的单位向量（弹丸相对速度取反）。
+在舰体坐标系里与 `forward` 点乘：`cos ≥ cos45` 正面、`cos > −cos45` 侧面、其余背面。
+传反这个符号，正面与背面会互换，而且只有贴近时才看得出来——这是本模块最容易犯、最难发现的错。
+
+**转向损耗**（可开关，`CombatWorld.TurnLossEnabled` 默认开）：
+
+```text
+load  = max(|ω_yaw|/YawRate, |ω_pitch|/PitchRate, |ω_roll|/RollRate)   // 0..1
+DR_eff = DR_face × (1 − 0.25 × load)
+```
+
+满转时掉四分之一，巡洋舰正面 0.85 → 0.6375，正好落到侧舷档位附近。留开关是为了灰盒开/关各跑一次：
+不动玩家行为就删掉，不留「设计上有、玩家感觉不到」的规则。
+
+**抗伤要付电**：`应付电 = 伤害 × DR × 0.12`。电不够时**先削 DR**（`dr ×= 可用电/应付电`），
+再用削过的 DR 算吸收——顺序反了会算出「付不起的电」这种自相矛盾的结果。
+全舰记账后这条对所有舰生效：敌舰与护航舰的盾也会因为没电而变薄，所以「盾硬不硬」也取决于它自己的储能。
+
+**过载算法**（口径 = 护盾**实际吸收量**，不是原始伤害；背面挨打时盾没接住什么，就不该过载）：
+
+```text
+onHit(absorbed):
+  window.push(now, absorbed)
+  excess = max(0, sum(window) − threshold)     // threshold 120，window 1.5 s
+  delta  = excess − deducted                   // 只扣新增的那部分
+  if delta > 0: buffer −= delta; deducted += delta
+  if buffer <= 0: buffer = 0; brokenUntil = now + 6
+
+onTick:
+  丢掉超过 1.5 s 的条目
+  deducted = min(deducted, max(0, sum − threshold))   // 窗口回退时只压上限，不退还
+```
+
+`deducted` 唯一的作用是防重复扣：第一笔还没过期时来第二笔，`sum` 与 `excess` 会一起涨，
+不减它缓冲池会以两倍速度漏。
+
+算例（池 300、阈值 120，每轮两发 130、轮间隔 2 s）：160 → 20 → 破。
+v0.3 写的「单舰永远碰不到过载」「双舰两轮必破」都是错的，已按实际重算。
+
+**破盾状态机**（四个边界都写死，不留含糊）：
+
+| 边界 | 定值 |
+| --- | --- |
+| 打空池的那一击是否穿透 | **否**，本击仍按已算 DR 结算，失效从下一击开始 |
+| 失效 6 s 内能否回充 | **不能**，buffer 锁 0，窗口停止累计 |
+| 6 s 后恢复多少 | **30%**（90 点），不是满——回满等于破盾白打 |
+| 「4 s 未受击回充」恢复什么 | **缓冲池**。DR 是常驻的，不需要恢复 |
+
+**延迟回充**：`now − LastHitTime ≥ 4 s` 才启动，速率 `RegenPerSec × Shield份额×3 × 供电系数`，
+能量低于容量 5% 时线性衰减到 0。这条是破防窗口能存在的原因，破了立刻回等于没破。
+
+**配置位置**：`content/ships/*.json` 的 `shield` / `overload` / `armor` 块。
+`armor` 的三个死字段已改名并接上：`coreMultiplier` → `kineticDr`、`outerMultiplier` → `beamDr`，
+语义从「乘数」翻成「减伤比例」（实际伤害 = 伤害 × (1 − DR)）。
+数值只有一个真源（JSON），`CampaignFacade` 与 CLI 都经 `ShipCatalog` 读取，见第 11 节。
+
+**当前数值后果（必须先知道，否则会以为是 bug）**：现在只有一门动能炮，
+正面穿透只剩 `(1−0.85)×(1−0.35) = 0.0975`，即正面 TTK 被拉长到数百秒，
+比设计稿按「光束 + 投射体」双通道估的 257 s 还慢。这不是护盾写错，是 T09 还没做。
+在双通道落地前，别拿 CLI 的击杀时间去对标单局 90–150 s 的目标。
+
+### 11. 舰船配置加载：JSON 是唯一真源（2026-11-26，T01b）
+
+**问题**：`content/ships/*.json` 早就写好了 `maneuver` / `power` / `shield` / `overload`，
+但运行时读的是 `CampaignFacade.ResolveStats()` 与 `tools/CombatSimCli` 里的两份手抄副本。
+结果是「数值放在配置里」这句话只对了一半：调参改 JSON 不生效，改代码则没人知道 JSON 是不是过期了。
+
+**落地形态**（`game/Packages/com.starpawn.combat/Runtime/Content/`，独立程序集 `StarPawn.Combat.Content`）：
+
+| 文件 | 干什么 |
+| --- | --- |
+| `MiniJson.cs` | 最小 JSON 解析（对象/数组/数字/字符串/布尔/null），纯 BCL，不引包 |
+| `ShipConfigParser.cs` | 一份 JSON → `ResolvedShipStats`，缺字段报错并给出 `combat.shield.frontDr` 这样的路径 |
+| `ShipCatalog.cs` | 扫目录、按 `id` 建索引，实现 `IShipStatsSource` |
+
+**分层**：`IShipStatsSource` 在 Combat.Contracts；应用层只认接口（`GameServices.Ships`），
+Bootstrap 决定装 `ShipCatalog.LoadDirectory(contentRoot/ships)`。CLI 自己也用同一个加载器，
+默认从 cwd 向上找 `content/ships`，可用 `--content` 覆盖。
+
+**缺字段必须报错，不许静默补缺省**：静默补缺省等于在代码里又藏一份数值表，
+调参时改 JSON 不生效而没人知道为什么。这条是 T01b 的全部意义。
+
+**为什么不用 `System.Text.Json`**：Domain 与 Content 都是 `noEngineReferences`，
+Unity 里能不能用取决于 API Compatibility Level 与是否额外塞了 DLL；加载器不该被这件事绑住。
+（Infrastructure 的 `ContentRepository` 用的是 `System.Text.Json`，那是 B 的领地，未改动。）
+
+**`ShipCatalog.Builtin` 是兜底，不是第二真源**：内容目录不可达时（Unity 的 content 还没进
+StreamingAssets、契约测试没有磁盘）用它，数值必须与 JSON 完全一致。
+`SmokeTests` 第 28 项逐字段比对磁盘配置与 Builtin，漂移会直接失败；
+完整加载器（B 的完整版，含 mod 与热重载）接入后这个属性应整体删除。
+
+**已知边界**：本条只做「JSON → 运行时属性」的通路，path 由调用方给。
+Unity 打包后 content 在哪（StreamingAssets / Addressables）仍是 B 的装配问题，不在本任务范围内。

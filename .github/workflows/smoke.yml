@@ -43,7 +43,16 @@ jobs:
         run: dotnet run --project tools/SmokeTests -c Release
 
       # 编译通过不等于跑得起来：这一步真的推 300 秒战斗，确认运动/弹道/结算没崩。
+      # 注意 CLI 的退出码语义是「胜负」：0 胜 / 1 败 / 3 打满时长未分胜负。
+      # 那是平衡结论，不是构建结论——所以这里只要求「跑完并给出结算」，
+      # 不能因为当前资产还打不沉敌舰就让 CI 红（否则这个闸门会被绕过）。
       - name: 三维战斗仿真 300 秒
-        run: >
-          dotnet run --project tools/CombatSimCli -c Release --
-          --seed 20261122 --seconds 300 --quiet
+        run: |
+          set +e
+          out=$(dotnet run --project tools/CombatSimCli -c Release -- --seed 20261122 --seconds 300 --quiet 2>&1)
+          code=$?
+          echo "$out"
+          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ] && [ "$code" -ne 3 ]; then
+            echo "仿真异常退出，码 $code"; exit 1
+          fi
+          echo "$out" | grep -q "=== 战斗结果" || { echo "没有结算输出"; exit 1; }

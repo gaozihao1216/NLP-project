@@ -223,6 +223,17 @@ T06 和 T08 都动 `PowerSystem`，排在同一个批里连续做完。T08 把�
 射界留缺口同时解决了"炮弹不能打到自己身上"，比给炮弹加排除发射者的碰撞过滤更可靠。
 细节见 `combat-controls.md` 5.2/5.4 与 `weapon-defense-design.md` 7.1。
 
+**T10 补丁（2026-11-26 第二轮，按代码走查意见改）**
+
+| 问题 | 修法 | 验收 |
+| --- | --- | --- |
+| 配置允许 `channel: beam`，运行时却仍走实体弹道：得到一颗"有飞行时间、按光束装甲结算"的炮弹 | `DamageChannel` 语义钉死为**只挑防御分支、不挑投送方式**；解析器拒绝 `beam` 并说明"光束投送尚未实现"，编成校验再挡一次（`UNSUPPORTED_CHANNEL`）。光束投送排 Phase 1.5，届时放开并加真正的瞬时分支 | 第 33 块（`beam` 必须报错）、第 34 块（手搭 Beam 炮座过不了 `ValidateStats`） |
+| 快照只有全舰汇总，开火事件把炮座名写进 `Detail` 文本：表现层无法知道哪座炮开的火、每座装填到哪、该朝哪 | `ShipSnapshot.Turrets[]` 逐座明细（`TurretId` / `MountLocal` / `Reload01` / `Loaded` / `HasAim` / `AimLocalDir` / `AimDistanceKm` / `InArc` / `CanFire`）；`BattleEvent.Shot` 给 `TurretId` / `ProjectileId` / `Origin` / `Direction` | 第 34 块：逐座 ID 同序、出界的座也有瞄准方向、出膛点=安装点、载荷方向与弹道点积 > 0.999 |
+
+顺带的一个结构性收益：瞄解算从「开火循环里逐座再算一遍」改成 `RefreshAims` 每 tick 算一次、
+开火判定与快照都读这份结果，`CountReady` 退化为只数装填。用同 seed 跑 300 s 对比，
+输出与改前逐位一致（0.829/0.416/0.829/0.928/1.000）——重构没有动物理。
+
 **T11 暴露信号**：`signal += dt`（蓄力中 / 开火中）/ `-= 0.5dt`（停火）。
 **消费者只有 AI 两处**：目标评分 ×(1 + signal)、以及 `signal < 0.2` 时 AI 有概率脱离。
 v0.3 的"锁定距离 ×1.3"与"5 s 不能脱战"都删掉——前者 AI 不经过玩家锁定通道，

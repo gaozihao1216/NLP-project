@@ -333,9 +333,29 @@ internal static class Program
                 " 盾=" + (s.ShieldBroken ? "破" : s.Buffer01.ToString("0.00")) +
                 " en=" + s.Energy01.ToString("0.00") + (s.PropulsionLocked ? "(熄火)" : "") +
                 " 炮位 " + s.TurretsInArc + "/" + s.TurretCount + "（装填完 " + s.TurretsLoaded + "）" +
+                TurretMarks(s) +
                 " 转速 " + s.YawRate.ToString("0.0") + "/" + s.PitchRate.ToString("0.0") + "°/s" +
                 (s.LockedTargetId.IsEmpty ? "" : " 锁定 " + s.LockedTargetId));
         }
+    }
+
+    /// <summary>
+    /// 逐座炮的一行简写，顺序与配置里的 turrets 数组一致：
+    /// C = 现在按开火这门出弹，R = 装填好了但目标在射界外，L = 还在装填。
+    /// 这段只读快照里的结构化明细，不解析事件文案——表现层将来也是这么用。
+    /// </summary>
+    private static string TurretMarks(ShipSnapshot s)
+    {
+        if (s.Turrets == null || s.Turrets.Length == 0) return "";
+        var sb = new System.Text.StringBuilder(" [");
+        for (int i = 0; i < s.Turrets.Length; i++)
+        {
+            var t = s.Turrets[i];
+            if (i > 0) sb.Append(' ');
+            sb.Append(t.CanFire ? 'C' : (t.Loaded ? 'R' : 'L'));
+        }
+        sb.Append(']');
+        return sb.ToString();
     }
 
     private static void PrintResult(BattleResult r)

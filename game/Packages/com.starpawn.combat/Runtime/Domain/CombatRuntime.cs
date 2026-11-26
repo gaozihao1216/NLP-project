@@ -58,14 +58,14 @@ namespace StarPawn.Combat.Domain
                 Hull = e.Stats.MaxHull * e.InheritedHull01,
                 // 缓冲池开局是满的：护盾的「厚度」来自三面 DR，池只负责吸收饱和。
                 ShieldBuffer = e.Stats.Overload.BufferCapacity,
-                // 炮座状态（长度、装填计时）按属性里的炮座表建；开局全部已装填。
-                TurretReload = new float[e.Stats.Turrets.Length],
                 // 能源每舰一份，全舰记账：护航舰与敌舰同样扣电、同样会熄火。
                 // 曾经为省算力只模拟主舰，但那样敌舰永远满推，压制结论不可信（T06）。
                 Power = PowerAllocation.Balanced,
                 Energy = e.Stats.Power.Capacity,
                 LockedTargetId = default(EntityId)
             };
+            // 炮座状态（装填计时 + 逐座瞄准）由 ResetTurrets 按属性里的炮座表建；开局全部已装填。
+            s.ResetTurrets();
             s.PrevPos = s.Pos;
             return s;
         }
@@ -288,6 +288,7 @@ namespace StarPawn.Combat.Domain
                     TurretCount = s.Stats.Turrets.Length,
                     TurretsLoaded = s.TurretsLoaded,
                     TurretsInArc = s.TurretsInArc,
+                    Turrets = BuildTurretSnapshots(s),
                     Buffer01 = s.Buffer01,
                     ShieldBroken = s.ShieldBroken,
                     FaceDrFront = ShieldSystem.EffectiveDr(_w, s, ShieldFace.Front),
@@ -337,6 +338,45 @@ namespace StarPawn.Combat.Domain
                 Obstacles = rocks,
                 Phase = _w.Phase
             };
+        }
+
+        /// <summary>
+        /// 把内部逐座状态搬成对外快照。方向从世界转回舰体坐标：视觉炮塔是舰体子物体，
+        /// 表现层拿到就能直接设 localRotation，舰体转向时炮塔自动跟着走。
+        /// </summary>
+        private static TurretSnapshot[] BuildTurretSnapshots(CombatShip s)
+        {
+            var defs = s.Stats.Turrets;
+            var arr = new TurretSnapshot[defs.Length];
+            for (int t = 0; t < defs.Length; t++)
+            {
+                var def = defs[t];
+                float reload = s.TurretReload != null && t < s.TurretReload.Length ? s.TurretReload[t] : 0f;
+                var aim = s.TurretAims != null && t < s.TurretAims.Length
+                    ? s.TurretAims[t] : default(TurretAim);
+
+                // 分母含能源档位系数：条走满与真正能打是同一个时刻。
+                float denom = def.ReloadSeconds * s.ReloadScale;
+                float p = reload <= 0f ? 1f : (denom > 1e-6f ? 1f - reload / denom : 1f);
+                if (p < 0f) p = 0f; else if (p > 1f) p = 1f;
+
+                // 还没解过瞄（开局第一帧、或刚 ResetTurrets）时给舰首朝向，别把零向量交给表现层。
+                Vec3 worldDir = aim.Dir.SqrLength > 1e-8f ? aim.Dir : s.Attitude.Forward;
+
+                arr[t] = new TurretSnapshot
+                {
+                    TurretId = def.Id,
+                    MountLocal = def.MountLocal,
+                    Reload01 = p,
+                    Loaded = reload <= 0f,
+                    HasAim = aim.HasAim,
+                    AimLocalDir = s.Attitude.Conjugate.Rotate(worldDir),
+                    AimDistanceKm = aim.HasAim ? aim.DistKm : 0f,
+                    InArc = aim.InArc,
+                    CanFire = reload <= 0f && aim.InArc
+                };
+            }
+            return arr;
         }
 
         public BattleEvent[] DrainEvents()

@@ -163,12 +163,20 @@ namespace StarPawn.Combat.Contracts
             new PowerProfile(120f, 3.4f, 2.2f, 0.8f, 5f, 0.2f);
     }
 
-    /// <summary>伤害通道。防御响应的分支就按它走，不按武器名。</summary>
+    /// <summary>
+    /// 伤害通道。**只决定防御侧走哪条结算分支**（判面 → 护盾 DR → 过载 → 装甲 DR → 结构），
+    /// **不决定投送方式**：有没有飞行时间、要不要算提前量，由武器实现决定，不由这个枚举决定。
+    ///
+    /// 当前运行时只有一种投送实现——实体投射体（WeaponSystem 建 Projectile，真实飞行）。
+    /// 所以配置层与编成校验都只接受 Kinetic：把炮座配成 Beam 会得到一颗「有飞行时间、
+    /// 却按光束装甲减伤结算的炮弹」，画面和规则两头都不对。光束投送（瞬时命中、无飞行时间）
+    /// 排在 Phase 1.5，届时再放开这一层校验，而不是现在让它静默降级。
+    /// </summary>
     public enum DamageChannel
     {
-        /// <summary>光束：瞬时命中、不吃跳弹与入射角。</summary>
+        /// <summary>光束结算分支：按装甲 BeamDr 减伤。**投送实现尚未落地**，配置层会拒绝。</summary>
         Beam = 0,
-        /// <summary>有限速度投射体：有弹道、有飞行时间。</summary>
+        /// <summary>投射体结算分支：按装甲 KineticDr 减伤。当前唯一可配置的通道。</summary>
         Kinetic = 1,
     }
 
@@ -335,6 +343,10 @@ namespace StarPawn.Combat.Contracts
         public readonly float Damage;
         public readonly float ShellVelocityKps;
         public readonly float MaxRangeKm;
+        /// <summary>
+        /// 结算通道。见 DamageChannel 的说明：它只挑防御分支，不挑投送方式。
+        /// 当前配置层只接受 Kinetic——投射体是唯一已实现的投送，Beam 会被解析器挡下。
+        /// </summary>
         public readonly DamageChannel Channel;
 
         public TurretProfile(string id,
@@ -652,6 +664,44 @@ namespace StarPawn.Combat.Contracts
         public float AimY;
         public float AimZ;
         public bool HasAim;
+        /// <summary>
+        /// 逐座炮的明细状态。上面 TurretCount/TurretsLoaded/TurretsInArc 是这三个数字的汇总，
+        /// 表现层要转视觉炮塔、画逐座装填环、解释「为什么这一门打不出去」时读这里，
+        /// 不要去解析 BattleEvent.Detail 的文案。
+        /// 与开火判定读的是同一份数据，所以「快照说能打」与「按开火真的出弹」不会打架。
+        /// </summary>
+        public TurretSnapshot[] Turrets;
+    }
+
+    /// <summary>
+    /// 单座炮的运行时状态。为表现层准备，规则层不读它。
+    ///
+    /// 方向一律给**舰体坐标**：视觉炮塔是舰体子物体，拿到就能直接设 localRotation，
+    /// 舰体姿态转头时炮塔自动跟着转，不需要表现层每帧做世界方向反解。
+    /// </summary>
+    public sealed class TurretSnapshot
+    {
+        /// <summary>炮座 ID（来自配置，如 "bow.l"）。表现层按它匹配视觉炮塔。</summary>
+        public string TurretId;
+        /// <summary>炮座安装点（舰体坐标 km）：x 右、y 上、z 舰首。</summary>
+        public Vec3 MountLocal;
+        /// <summary>
+        /// 装填进度 0..1，1 = 装填完毕。分母含本 tick 的能源档位系数——
+        /// 交战档装填更快，条走完的时刻和真正能打的时刻是同一个。
+        /// </summary>
+        public float Reload01;
+        /// <summary>装填完毕（等价于 Reload01 到 1，但免去浮点比较）。</summary>
+        public bool Loaded;
+        /// <summary>本座是否解出了有效射击解（射程内 + 有目标或瞄准点）。false 时 AimLocalDir 是待机朝向。</summary>
+        public bool HasAim;
+        /// <summary>本座的瞄准方向（**舰体坐标**单位向量）。装填中也有值，视觉炮塔照它转。</summary>
+        public Vec3 AimLocalDir;
+        /// <summary>瞄准距离 km。HasAim 为 false 时是 0。</summary>
+        public float AimDistanceKm;
+        /// <summary>是否落在本座射界内（已含方位角与俯仰限位）。</summary>
+        public bool InArc;
+        /// <summary>装填完 + 有解 + 在界内 = 现在按开火这一门会出弹。</summary>
+        public bool CanFire;
     }
 
     public sealed class ProjectileSnapshot
@@ -736,6 +786,20 @@ namespace StarPawn.Combat.Contracts
                 if (m.Accel(axis) <= 0f) return CommandResult.Fail("BAD_STATS", "角加速度必须为正: " + axis);
             }
             if (stats.Power.Capacity <= 0f) return CommandResult.Fail("BAD_STATS", "能源容量必须为正");
+
+            // 投送方式目前只有投射体一种。含 Beam 炮座的编成一律不许入战：
+            // 配置层已经拒绝了这种写法，这里再挡一道手搭属性对象（测试、假实现、存档迁移）。
+            if (stats.Turrets != null)
+            {
+                for (int i = 0; i < stats.Turrets.Length; i++)
+                {
+                    var t = stats.Turrets[i];
+                    if (t.Channel != DamageChannel.Kinetic)
+                        return CommandResult.Fail("UNSUPPORTED_CHANNEL",
+                            "炮座 " + t.Id + " 使用 " + t.Channel +
+                            " 通道：光束投送尚未实现，当前只支持 kinetic");
+                }
+            }
             return CommandResult.Ok();
         }
 
@@ -868,7 +932,33 @@ namespace StarPawn.Combat.Contracts
         public EntityId SourceId;
         public EntityId TargetId;
         public SimClock At;
+        /// <summary>
+        /// 给人看的一句话（副官提示、调试日志直接用）。**表现层不要解析它**——
+        /// 文案随时会改，需要机器可读的数据时读结构化字段。
+        /// </summary>
         public string Detail;
+        /// <summary>
+        /// Fire 事件的结构化载荷：哪座炮、打出哪颗弹、从哪出膛、朝哪飞。
+        /// 表现层靠它把炮口火焰与具体弹丸直接对上，不需要解析 Detail、也不需要自己重算提前量。
+        /// 其他事件为 null。
+        /// </summary>
+        public TurretShot Shot;
+    }
+
+    /// <summary>
+    /// 一次炮座开火的事实。Direction 已含散布，与 Projectile 的实际初速同源，
+    /// 所以表现层的曳光弹可以直接拿它朝画。
+    /// </summary>
+    public sealed class TurretShot
+    {
+        /// <summary>开火炮座 ID，与 ShipSnapshot.Turrets[i].TurretId 对得上。</summary>
+        public string TurretId;
+        /// <summary>打出的那颗弹丸 ID，与同一帧快照里 Projectiles 的 ProjectileId 对得上。</summary>
+        public EntityId ProjectileId;
+        /// <summary>出膛点（世界坐标 km）。</summary>
+        public Vec3 Origin;
+        /// <summary>出膛方向（世界坐标单位向量，**已含散布**）。</summary>
+        public Vec3 Direction;
     }
 
     /// <summary>逐舰战后事实。Fleet 据此回写长期损伤，Combat 不认识长期状态。</summary>

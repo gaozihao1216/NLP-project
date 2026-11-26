@@ -51,7 +51,11 @@ namespace StarPawn.Combat.Domain
             return null;
         }
 
-        public void Emit(string kind, EntityId source, EntityId target, string detail)
+        /// <summary>
+        /// 记一条事件。shot 只为 Fire 事件准备：结构化载荷与 Detail 文案并行，
+        /// 表现层读前者、副官提示读后者，两边不用互相猜。
+        /// </summary>
+        public void Emit(string kind, EntityId source, EntityId target, string detail, TurretShot shot = null)
         {
             Events.Add(new BattleEvent
             {
@@ -59,7 +63,8 @@ namespace StarPawn.Combat.Domain
                 SourceId = source,
                 TargetId = target,
                 At = Clock,
-                Detail = detail
+                Detail = detail,
+                Shot = shot
             });
         }
     }

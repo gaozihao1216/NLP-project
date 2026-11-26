@@ -1336,7 +1336,194 @@ internal static class Program
                 Check("channel 写错报错（不许静默当动能）",
                     !ok && string.Join("; ", errs).Contains("channel"),
                     string.Join("; ", errs));
+
+                // beam 通道：投送实现还没有，必须拒绝，不能静默打出一颗「有飞行时间的激光」。
+                ok = ShipConfigParser.TryParse(
+                    text.Replace("\"damage\": 25", "\"channel\": \"beam\""), out id, out st, out errs);
+                string beamError = string.Join("; ", errs);
+                Check("channel=beam 被拒（光束投送尚未实现）",
+                    !ok && beamError.Contains("turrets[0].channel") && beamError.Contains("尚未实现"),
+                    beamError);
             }
+        }
+
+        // 34. 逐炮座结构化数据：快照明细 + 开火事件载荷（表现层接口）
+        {
+            ResolvedShipStats cruiser;
+            if (!ShipCatalog.Builtin.TryGet("ship.g_cruiser", out cruiser))
+            {
+                Check("巡洋舰属性就位（逐座快照用例）", false, "Builtin 里没有 ship.g_cruiser");
+            }
+            else
+            {
+                var gunnerId = new EntityId("ally.gunner");
+                var spec = new BattleStartSpec
+                {
+                    BattleId = new EntityId("battle.turretui"),
+                    MissionId = "mission.smoke",
+                    OriginSystemId = new EntityId("sys.kaila"),
+                    TargetSystemId = new EntityId("sys.kaila"),
+                    Allies = new[]
+                    {
+                        new FleetEntry
+                        {
+                            ShipId = gunnerId,
+                            DefinitionId = new ContentId("ship.g_cruiser"),
+                            Role = StarPawn.Combat.Contracts.SquadRole.Flagship,
+                            SquadIndex = 0,
+                            Spawn = new SpawnPoint(0f, 0f, 0f, 0f, 0f, 0f),
+                            Stats = cruiser, InheritedHull01 = 1f
+                        }
+                    },
+                    // 敌舰放到 5000 km 外：DestroyAll 在「没有敌人」时第一 tick 就判胜利，
+                    // 之后 Step 会整体早退——那就测不到开火了。放一个够不着的目标即可。
+                    Enemies = new[]
+                    {
+                        new FleetEntry
+                        {
+                            ShipId = new EntityId("enemy.far"),
+                            DefinitionId = new ContentId("ship.g_cruiser"),
+                            Role = StarPawn.Combat.Contracts.SquadRole.Escort,
+                            SquadIndex = 1,
+                            Spawn = new SpawnPoint(0f, 0f, 5000f, 180f, 0f, 0f),
+                            Stats = cruiser, InheritedHull01 = 1f
+                        }
+                    },
+                    BattlefieldLayout = "open_space",
+                    Objective = new BattleObjective { Kind = "DestroyAll", TimeLimitSeconds = 600f },
+                    RandomSeed = 5,
+                    FixedStep = 1f / 30f
+                };
+
+                var rt = new CombatRuntime();
+                rt.Initialize(spec);
+                rt.Submit(new AimCommand { ShipId = gunnerId, WorldX = 0f, WorldY = 0f, WorldZ = 100f });
+                rt.Step();
+
+                var ship = rt.ReadSnapshot().Ships[0];
+                Check("快照带逐座明细，座数与配置一致",
+                    ship.Turrets != null && ship.Turrets.Length == cruiser.Turrets.Length,
+                    ship.Turrets == null ? "null" : ship.Turrets.Length.ToString());
+
+                bool idsOk = ship.Turrets != null && ship.Turrets.Length == cruiser.Turrets.Length;
+                string idTrace = "";
+                if (idsOk)
+                {
+                    for (int i = 0; i < ship.Turrets.Length; i++)
+                    {
+                        if (ship.Turrets[i].TurretId != cruiser.Turrets[i].Id) idsOk = false;
+                        idTrace += (i > 0 ? "," : "") + ship.Turrets[i].TurretId;
+                    }
+                }
+                Check("逐座 ID 与配置同序（表现层靠它匹配视觉炮塔）", idsOk, idTrace);
+
+                Check("正前方：首两座可开火、尾两座装填好但出界",
+                    ship.Turrets[0].CanFire && ship.Turrets[1].CanFire &&
+                    !ship.Turrets[2].CanFire && !ship.Turrets[3].CanFire &&
+                    ship.Turrets[2].Loaded && ship.Turrets[3].Loaded,
+                    "canFire=" + ship.Turrets[0].CanFire + "/" + ship.Turrets[1].CanFire + "/" +
+                    ship.Turrets[2].CanFire + "/" + ship.Turrets[3].CanFire);
+
+                Check("逐座装填进度开局为 1（满）",
+                    ship.Turrets[0].Reload01 > 0.999f && ship.Turrets[3].Reload01 > 0.999f,
+                    "r=" + ship.Turrets[0].Reload01.ToString("0.000"));
+
+                // 出界的那两座也要有瞄准方向：视觉炮塔在「打不了」时照样该朝目标转，
+                // 只是抬不起头/够不着——这正是 InArc 与 AimDir 必须分开的理由。
+                bool aimOk = true;
+                for (int i = 0; i < ship.Turrets.Length; i++)
+                {
+                    var t = ship.Turrets[i];
+                    if (!t.HasAim) aimOk = false;
+                    if (Math.Abs(t.AimLocalDir.Length - 1f) > 1e-3f) aimOk = false;
+                    if (t.AimLocalDir.Z < 0.99f) aimOk = false;   // 目标在正前，舰体坐标下应指向 +Z
+                }
+                Check("逐座瞄准方向给齐（舰体坐标，出界的也有）", aimOk,
+                    "bow.l=" + ship.Turrets[0].AimLocalDir);
+
+                rt.Submit(new FireCommand { ShipId = gunnerId });
+                rt.Step();
+                var after = rt.ReadSnapshot().Ships[0];
+                Check("开火后只有开火那两座进装填",
+                    after.Turrets[0].Reload01 < 0.02f && after.Turrets[1].Reload01 < 0.02f &&
+                    after.Turrets[2].Reload01 > 0.999f && after.Turrets[3].Reload01 > 0.999f,
+                    "r=" + after.Turrets[0].Reload01.ToString("0.000") + "/" +
+                    after.Turrets[2].Reload01.ToString("0.000"));
+
+                TurretShot shot = null;
+                int fireCount = 0;
+                bool shotsOk = true;
+                string turretTrace = "";
+                foreach (var e in rt.DrainEvents())
+                {
+                    if (e.Kind != "Fire") continue;
+                    fireCount++;
+                    if (e.Shot == null || e.Shot.ProjectileId.IsEmpty || string.IsNullOrEmpty(e.Shot.TurretId))
+                    {
+                        shotsOk = false;
+                        continue;
+                    }
+                    if (shot == null) shot = e.Shot;
+                    turretTrace += (turretTrace.Length > 0 ? "," : "") + e.Shot.TurretId;
+                }
+                Check("Fire 事件带结构化载荷（舰/座/弹/出膛点）",
+                    fireCount == 2 && shotsOk && turretTrace.Contains("bow.l") && turretTrace.Contains("bow.r"),
+                    "count=" + fireCount + " ids=" + turretTrace);
+
+                if (shot != null)
+                {
+                    // 舰在原点、姿态 identity、速度 0：出膛点应当就是该炮座的安装点。
+                    int idx = -1;
+                    for (int i = 0; i < cruiser.Turrets.Length; i++)
+                        if (cruiser.Turrets[i].Id == shot.TurretId) idx = i;
+
+                    bool originOk = idx >= 0 &&
+                        Vec3.Distance(shot.Origin, cruiser.Turrets[idx].MountLocal) < 0.01f;
+                    Check("出膛点 = 炮座安装点（不是舰体重心）", originOk,
+                        "origin=" + shot.Origin + " mount=" + (idx >= 0 ? cruiser.Turrets[idx].MountLocal.ToString() : "?"));
+
+                    // 再走两 tick，用弹丸实际位移核对方向（散布已含在 Direction 里）。
+                    rt.Step();
+                    rt.Step();
+                    var later = rt.ReadSnapshot();
+                    Vec3 pos = Vec3.Zero;
+                    bool found = false;
+                    for (int i = 0; i < later.Projectiles.Length; i++)
+                        if (later.Projectiles[i].ProjectileId == shot.ProjectileId)
+                        {
+                            pos = new Vec3(later.Projectiles[i].X, later.Projectiles[i].Y, later.Projectiles[i].Z);
+                            found = true;
+                        }
+                    bool dirOk = found &&
+                        Vec3.Dot((pos - shot.Origin).Normalized, shot.Direction) > 0.999f;
+                    Check("载荷方向与弹道一致（曳光弹可以照它画）", dirOk,
+                        found ? "dot=" + Vec3.Dot((pos - shot.Origin).Normalized, shot.Direction).ToString("0.0000")
+                              : "找不到这颗弹");
+                }
+
+                // 装填中的逐座进度：条没走满时 Loaded 必须为 false，CanFire 必须为 false。
+                rt.Step();
+                var mid = rt.ReadSnapshot().Ships[0];
+                Check("装填中：Reload01 落在 (0,1) 且不能再开火",
+                    mid.Turrets[0].Reload01 > 0f && mid.Turrets[0].Reload01 < 1f &&
+                    !mid.Turrets[0].Loaded && !mid.Turrets[0].CanFire,
+                    "r=" + mid.Turrets[0].Reload01.ToString("0.000") + " loaded=" + mid.Turrets[0].Loaded);
+            }
+
+            // 编成校验的第二道闸：手搭的 Beam 炮座（绕过配置解析）也不许入战。
+            var beamStats = new ResolvedShipStats(
+                100f, 20f, 30f, 10f, 300f, 3f, 3f, 60f, 2f, 0.9f, 0.25f,
+                new ManeuverProfile(2.5f, 30f, 18f, 54f, 120f, 72f, 216f), 1f, PowerProfile.Default,
+                ArmorProfile.Default, ShieldProfile.DefaultFor(2f), OverloadProfile.DefaultFor(60f),
+                new[]
+                {
+                    new TurretProfile("laser", 0f, 0f, 0.3f, 0f, 180f, -90f, 90f,
+                        3f, 10f, 300f, 200f, DamageChannel.Beam)
+                });
+            var beamCheck = BattleRules.ValidateStats(beamStats);
+            Check("编成校验拒绝 Beam 炮座（光束投递不存在）",
+                !beamCheck.Success && beamCheck.Error.Code.Contains("UNSUPPORTED_CHANNEL"),
+                beamCheck.Success ? "居然通过了" : beamCheck.Error.ToString());
         }
 
 

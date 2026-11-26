@@ -16,6 +16,23 @@ namespace StarPawn.Combat.Domain
     }
 
     /// <summary>
+    /// 单座炮在本 tick 解出的射击状态。WeaponSystem 每 tick 刷新一次，
+    /// 开火判定、就位计数、快照三处读的都是这一份——**只解一次**，就不会出现
+    /// 「HUD 说这门能打、按开火却没出弹」这种自相矛盾。
+    /// </summary>
+    public struct TurretAim
+    {
+        /// <summary>是否解出了有效射击解（射程内 + 有锁定或瞄准点）。</summary>
+        public bool HasAim;
+        /// <summary>瞄准方向，**世界坐标**单位向量。无解时是沿舰首的待机朝向。</summary>
+        public Vec3 Dir;
+        /// <summary>瞄准距离 km。无解时为 0。</summary>
+        public float DistKm;
+        /// <summary>是否落在本座射界内（已含俯仰限位）。无解时恒为 false。</summary>
+        public bool InArc;
+    }
+
+    /// <summary>
     /// 能量三路分配。**每舰一份**：不同舰可以各自处在导航/交战档，不存在「全队共用一套」。
     /// 原作里靠一句口令切换，所以这里仍是整体预设，不是实时滑条。
     /// </summary>
@@ -107,6 +124,13 @@ namespace StarPawn.Combat.Domain
         // 武器：装填是**每座炮**独立的，所以这里是一个和 Stats.Turrets 等长的数组（0 = 已装填）。
         // 一门炮打出去只让那一门进 CD，其余照常待发。
         public float[] TurretReload;
+        /// <summary>逐座的瞄准结果，与 TurretReload 等长，由 WeaponSystem 每 tick 刷新。</summary>
+        public TurretAim[] TurretAims;
+        /// <summary>
+        /// 本 tick 的装填时间倍率（交战档最短、航行档最长）。装填进度的分母要乘它，
+        /// 否则导航档下进度条会先走满、还要再等一截才真能打。
+        /// </summary>
+        public float ReloadScale = 1f;
         /// <summary>本 tick 已装填完的炮座数（HUD 的「X/Y 就位」左边那个 X）。</summary>
         public int TurretsLoaded;
         /// <summary>既装填完、目标又落在射界内的炮座数。这才是「现在按开火能打出去几发」。</summary>
@@ -145,18 +169,25 @@ namespace StarPawn.Combat.Domain
                 float best = 0f;
                 for (int i = 0; i < ts.Length && i < defs.Length; i++)
                 {
-                    float p = 1f - ts[i] / defs[i].ReloadSeconds;
+                    float denom = defs[i].ReloadSeconds * ReloadScale;
+                    float p = denom > 1e-6f ? 1f - ts[i] / denom : 1f;
                     if (p > best) best = p;
                 }
                 return best < 0f ? 0f : (best > 1f ? 1f : best);
             }
         }
 
-        /// <summary>按当前属性重建炮座状态：开局全部装填完毕（0 = 可立刻开火）。</summary>
+        /// <summary>
+        /// 按当前属性重建炮座状态：开局全部装填完毕（0 = 可立刻开火）。
+        /// 瞄准数组一起建，长度与装填数组对齐——两者少一个都会让 WeaponSystem 每 tick 重建。
+        /// </summary>
         public void ResetTurrets()
         {
-            TurretReload = new float[Stats != null && Stats.Turrets != null ? Stats.Turrets.Length : 0];
-            TurretsLoaded = TurretReload.Length;
+            int n = Stats != null && Stats.Turrets != null ? Stats.Turrets.Length : 0;
+            TurretReload = new float[n];
+            TurretAims = new TurretAim[n];
+            ReloadScale = 1f;
+            TurretsLoaded = n;
             TurretsInArc = 0;
         }
 

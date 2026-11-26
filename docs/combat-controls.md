@@ -252,6 +252,12 @@ Energy ≥ Capacity × Restart    → 解锁，事件 PowerRestored
 - 命中只负责回答"谁打到了谁"。伤害结算全部走 `DamageResolver.ResolveHit`：判面 → 护盾 DR → 过载 → 装甲 → 结构。[已实现]
 - 装甲不再死着：`beamDr` / `kineticDr` 由 `armor` 段读入，按通道取一个固定减伤（光束 0.20 / 动能 0.35）。跳弹与入射角判定仍然不做（Phase 2）。[已实现]
 - 护盾不是血条：三面常驻减伤 + 过载缓冲池，详见第 5.6 节。[已实现]
+- **通道只挑防御分支，不挑投送方式**。`DamageChannel` 现在只决定装甲读 `beamDr` 还是 `kineticDr`；
+  有没有飞行时间由武器实现决定，不由它决定。运行时只有投射体一种投送，所以配置里的 `channel`
+  只接受 `kinetic`——配成 `beam` 会被解析器直接拒绝，编成校验再挡一次（`UNSUPPORTED_CHANNEL`）。
+  理由很实在：配成 beam 会得到"有飞行时间、却按光束装甲结算"的炮弹，画面与规则两头都错。
+  光束投送（瞬时命中、无飞行时间）排在 Phase 1.5，届时放开校验并给 `WeaponSystem` 加真正的瞬时分支，
+  而不是现在让它静默降级。[已实现]
 
 ### 5.4 炮塔化（已实现，T10，2026-11-26 定案）
 
@@ -284,6 +290,20 @@ Energy ≥ Capacity × Restart    → 解锁，事件 PowerRestored
 
 **HUD 的口径**：快照里给三个数 `TurretCount` / `TurretsLoaded` / `TurretsInArc`，
 UI 显示成「3/4 就位（装填完 4）」。分开报是因为"在冷却"和"该转向了"是两种完全不同的反馈。
+
+**表现层接口走结构化字段，不解析文案**（2026-11-26 补）：
+
+| 数据 | 字段 | 表现层拿它做什么 |
+| --- | --- | --- |
+| 逐座快照 | `ShipSnapshot.Turrets[i]`：`TurretId`、`MountLocal`、`Reload01`、`Loaded`、`HasAim`、`AimLocalDir`、`AimDistanceKm`、`InArc`、`CanFire` | 按 ID 匹配视觉炮塔；照 `AimLocalDir` 平滑转向；逐座画装填环；用 `InArc`/`CanFire` 区分「在冷却」与「该转船」 |
+| 开火事件 | `BattleEvent.Shot`：`TurretId`、`ProjectileId`、`Origin`、`Direction` | 炮口火焰挂在 `Origin`、曳光弹照 `Direction` 画、把特效和弹丸 ID 对上 |
+
+四条口径要注意：
+
+- `AimLocalDir` 是**舰体坐标**，装填中的炮也有方向——"打不了"和"没朝目标"是两件事，出界的那几座照样该转头。
+- `Reload01` 的分母含能源档位系数，所以「条满」与「真能打」是同一时刻；不含系数会先走满再干等。
+- `Direction` **已含散布**，与弹丸初速同源；表现层不必自己再抽一次随机，也不该重算提前量。
+- 视觉炮塔做平滑转动只是表现效果——规则层不建模转速，`CanFire` 与"炮管转到哪"无关。
 
 ### 5.5 来袭方向怎么定义（判面的唯一约定）
 

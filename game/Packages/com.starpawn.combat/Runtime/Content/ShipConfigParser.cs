@@ -157,8 +157,9 @@ namespace StarPawn.Combat.Content
 
                     string channelText = tn.OptStr("channel", "kinetic");
                     DamageChannel channel;
-                    if (!TryChannel(channelText, out channel))
-                        log.Add(tn.Path + ".channel 只能是 kinetic 或 beam，当前 " + channelText);
+                    string channelError;
+                    if (!TryChannel(channelText, out channel, out channelError))
+                        log.Add(tn.Path + ".channel " + channelError);
 
                     turretList.Add(new TurretProfile(tid, mr, mu, mf,
                         yawCenter, yawHalf, pitchMin, pitchMax,
@@ -208,16 +209,33 @@ namespace StarPawn.Combat.Content
             return true;
         }
 
-        /// <summary>通道名区分大小写地解析。写错必须报错——静默当成动能会让光束武器悄悄打错装甲。</summary>
-        private static bool TryChannel(string text, out DamageChannel channel)
+        /// <summary>
+        /// 通道名解析（不区分大小写）。**当前只放行 kinetic**：投送实现只有实体投射体一种，
+        /// 配成 beam 会得到一颗「有飞行时间、却按光束装甲减伤结算」的炮弹——画面和规则两头都错。
+        /// 与其让它静默降级，不如在配置期就硬失败。光束投送排在 Phase 1.5，
+        /// 届时这里放开，同时 WeaponSystem 要加一条真正的瞬时投送分支。
+        /// </summary>
+        private static bool TryChannel(string text, out DamageChannel channel, out string error)
         {
             channel = DamageChannel.Kinetic;
-            if (string.IsNullOrEmpty(text)) return false;
+            error = null;
+            if (string.IsNullOrEmpty(text))
+            {
+                error = "不能为空，当前只支持 kinetic";
+                return false;
+            }
+
             switch (text.Trim().ToLowerInvariant())
             {
-                case "kinetic": channel = DamageChannel.Kinetic; return true;
-                case "beam": channel = DamageChannel.Beam; return true;
-                default: return false;
+                case "kinetic":
+                    return true;
+                case "beam":
+                    error = "暂不接受 beam：光束投送（瞬时命中、无飞行时间）尚未实现，" +
+                            "现在配成 beam 只会打出有飞行时间的实体炮弹。Phase 1.5 落地后放开。";
+                    return false;
+                default:
+                    error = "只能是 kinetic（当前版本），当前 " + text;
+                    return false;
             }
         }
 

@@ -65,7 +65,10 @@ namespace StarPawn.Combat.Domain
                 FaceDrFront = e.Stats.Shield.FrontDr,
                 FaceDrSide = e.Stats.Shield.SideDr,
                 FaceDrRear = e.Stats.Shield.RearDr,
-                PowerMode = PowerPreset.Balanced, Energy01 = 1f
+                PowerMode = PowerPreset.Balanced, Energy01 = 1f,
+                // 假实现不跑炮座规则，逐座明细给空数组而不是 null：
+                // 表现层统一按「数组为空就退化成汇总口径」处理，不必到处判空。
+                Turrets = new TurretSnapshot[0]
             };
         }
 
@@ -200,7 +203,8 @@ namespace StarPawn.Combat.Domain
                     Health01 = s.Health01, IsAlive = s.IsAlive, Reload01 = s.Reload01,
                     Buffer01 = s.Buffer01, ShieldBroken = s.ShieldBroken,
                     FaceDrFront = s.FaceDrFront, FaceDrSide = s.FaceDrSide, FaceDrRear = s.FaceDrRear,
-                    PowerMode = s.PowerMode, Energy01 = s.Energy01
+                    PowerMode = s.PowerMode, Energy01 = s.Energy01,
+                    Turrets = s.Turrets
                 };
             }
             var proj = new ProjectileSnapshot[_snapshot.Projectiles.Length];

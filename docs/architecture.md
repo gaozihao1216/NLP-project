@@ -213,6 +213,10 @@ Domain/
 - `LockTargetCommand { ShipId, TargetId }`：锁定目标，`TargetId` 为空即解除；细节见第 9 节。
 - 快照带位置、姿态（Yaw/Pitch/Roll）、速度三分量、三轴角速度、能源比例、锁定目标与解算出的瞄准点。
   姿态内部用四元数，导出时才转欧拉角，约定与 Unity 的 `Quaternion.Euler(pitch, yaw, roll)` 一致。
+- 炮座有逐座明细 `ShipSnapshot.Turrets`（`TurretId` / `MountLocal` / `Reload01` / `Loaded` / `HasAim` /
+  `AimLocalDir` / `InArc` / `CanFire`），开火事件带 `BattleEvent.Shot`（`TurretId` / `ProjectileId` /
+  `Origin` / `Direction`）。表现层靠这两个结构化字段驱动炮塔与炮口特效，**不解析 `Detail` 文案**。
+  两个汇总数字（`TurretsLoaded` / `TurretsInArc`）与明细读的是同一份每 tick 解算结果。
 
 ### 2. 机动参数全部来自舰体配置
 

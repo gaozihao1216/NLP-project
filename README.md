@@ -89,6 +89,8 @@ xelatex -interaction=nonstopmode proposal.tex    # 第二遍稳定交叉引用
 而不是护盾或伤害。细节见 `docs/phase1-tasks.md` 第 6 节。
 
 下一步：按 `docs/vertical-slice-plan.md` 做最小闭环——Unity 侧场景与输入层、任务日志运行时、星图两节点 UI。
+接 HUD 前先读 `docs/combat-open-items.md`：`CanFire` 不含能源、装填时长要在开火时定死、
+瞄准方向与弹丸世界运动方向的关系待选，这三条都会影响表现层怎么写。
 战斗数值验证：`dotnet run --project tools/CombatSimCli -- --seed N`。
 
 ## 说明

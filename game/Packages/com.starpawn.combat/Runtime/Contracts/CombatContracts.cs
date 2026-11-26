@@ -641,7 +641,10 @@ namespace StarPawn.Combat.Contracts
         public int TurretCount;
         /// <summary>已装填完的炮座数。</summary>
         public int TurretsLoaded;
-        /// <summary>既装填完、目标又落在射界内的炮座数。按开火能打出去的只有这几门。</summary>
+        /// <summary>
+        /// 具备射击条件的炮座数（装填完 + 目标在射界内）。能源不足时实际出弹会更少，
+        /// 这个数是"有几门有资格"，不是"这一轮会打出几发"。
+        /// </summary>
         public int TurretsInArc;
         /// <summary>过载缓冲池余量 0..1。护盾的「厚度」是三面 DR，不是这条进度条。</summary>
         public float Buffer01;
@@ -700,7 +703,11 @@ namespace StarPawn.Combat.Contracts
         public float AimDistanceKm;
         /// <summary>是否落在本座射界内（已含方位角与俯仰限位）。</summary>
         public bool InArc;
-        /// <summary>装填完 + 有解 + 在界内 = 现在按开火这一门会出弹。</summary>
+        /// <summary>
+        /// 具备射击条件：装填完 + 有射击解 + 在界内。**不含能源**——多门炮共享一套储能，
+        /// 轮到这一门时可能已经扣不出电了。所以 CanFire 只说明"现在按开火这一门**有资格**出弹"，
+        /// 不说明它出了弹；是否真开火一律看 Fire 事件。详见 docs/combat-open-items.md 第 1 节。
+        /// </summary>
         public bool CanFire;
     }
 
@@ -946,8 +953,12 @@ namespace StarPawn.Combat.Contracts
     }
 
     /// <summary>
-    /// 一次炮座开火的事实。Direction 已含散布，与 Projectile 的实际初速同源，
-    /// 所以表现层的曳光弹可以直接拿它朝画。
+    /// 一次炮座开火的事实。
+    ///
+    /// 注意 Direction 是**炮口朝向**，不是弹丸的世界运动方向：当前弹丸初速 = 舰速 + Direction × 弹速，
+    /// 所以舰体横移时两者会差出几度到十几度。要画长曳光或推弹道，请跟快照里弹丸的实际位置，
+    /// 不要拿 Direction × 弹速 × t 外推。这条口径是否改成"世界初速方向"待决，
+    /// 见 docs/combat-open-items.md 第 3 节。
     /// </summary>
     public sealed class TurretShot
     {
@@ -957,7 +968,10 @@ namespace StarPawn.Combat.Contracts
         public EntityId ProjectileId;
         /// <summary>出膛点（世界坐标 km）。</summary>
         public Vec3 Origin;
-        /// <summary>出膛方向（世界坐标单位向量，**已含散布**）。</summary>
+        /// <summary>
+        /// 炮口朝向（世界坐标单位向量，**已含散布**）。它只描述炮管指向与散布，不含舰速。
+        /// 弹丸真正的世界初速度目前没有单独字段，表现层需要时读快照跟踪弹丸。
+        /// </summary>
         public Vec3 Direction;
     }
 

@@ -1,5 +1,8 @@
 // 武器：装填、射程、射界锥、散布。炮弹真实飞行，不做瞬间命中。
 // 散布角与装填时间都来自舰体配置，代码里没有「8 度」「3.2 秒」这类常数。
+//
+// 开火顺序是硬约束：装填 → 瞄准/射程 → 扣电 → 散布 → 出弹 → 重装填。
+// 任何一步失败都「什么都不改」：不扣电、不进装填、不动随机序列。
 
 using System;
 using StarPawn.Combat.Contracts;
@@ -32,13 +35,9 @@ namespace StarPawn.Combat.Domain.Systems
                     continue;
                 }
 
-                // 开火要从储能池抽一笔电。抽不出来就不打——能源见底时武器和推进一起哑火。
-                if (!PowerSystem.TryConsumeShot(w, s))
-                {
-                    w.Emit("PowerLow", s.Id, default(EntityId), "能源不足，无法开火");
-                    continue;
-                }
-
+                // 顺序不能反：先确认这一发真的打得出去，再从储能池抽电。
+                // 旧实现先扣电再查射程，玩家对射程外的目标连点开火，炮弹没出来、装填没进，
+                // 电却每点一次少一笔——这类「看不见的白扣」最难被玩家归因。
                 // 没给瞄准点时沿舰首方向打，射程按炮的最大射程算。
                 Vec3 aim = s.HasAim
                     ? s.AimPoint
@@ -59,6 +58,13 @@ namespace StarPawn.Combat.Domain.Systems
                     continue;
                 }
 
+                // 开火要从储能池抽一笔电。抽不出来就不打——能源见底时武器和推进一起哑火。
+                if (!PowerSystem.TryConsumeShot(w, s))
+                {
+                    w.Emit("PowerLow", s.Id, default(EntityId), "能源不足，无法开火");
+                    continue;
+                }
+
                 // 固定炮有射界锥：出锥时钳到锥边，仍然开火，但事件里标记，HUD 可提示。
                 Vec3 dir = toAim / dist;
                 bool inArc = CombatMath.ClampToArc(
@@ -66,6 +72,8 @@ namespace StarPawn.Combat.Domain.Systems
                 if (!inArc)
                     w.Emit("OutOfArc", s.Id, default(EntityId), "目标超出射界，已钳到锥边");
 
+                // 散布要消费随机数：必须放在「这一发确定会打出去」之后，
+                // 否则一次被拒的开火也会改变随机序列，同 seed 的结果跟着漂。
                 dir = ApplySpread(w, s, aimedDir);
 
                 // 炮弹世界速度 = 舰速 + 炮口方向 × 弹速。

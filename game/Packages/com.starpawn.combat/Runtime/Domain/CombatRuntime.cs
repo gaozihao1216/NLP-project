@@ -163,18 +163,20 @@ namespace StarPawn.Combat.Domain
             for (int i = 0; i < _w.Ships.Count; i++)
                 _w.Ships[i].AngularInput = Vec3.Zero;
 
+            // 2. 收齐「这一 tick 打算怎么飞、打不打」的意图，玩家与 AI 走同一条路。
+            //    AI 必须排在能源之前：它写下的 AngularInput 与 ThrustSetpoint 就是这一 tick 的
+            //    真实输入。排到能源之后，AI 的三轴操舵会在能源眼里恒为零（主动转向不扣电），
+            //    推力则按上一帧档位计费——玩家和 AI 受的约束就不一样了。
             ApplyPendingCommands();
+            SimpleEnemyController.Step(_w);
 
-            // 2. 能源按本 tick 的推力档位、操舵输入与护盾需求扣电；耗尽则推进归零。
+            // 3. 能源按上面收齐的档位与操舵输入扣电；耗尽则推进归零。
             //    必须排在 Movement 之前，让物理读到的是已经过能源约束的档位。
             PowerSystem.Step(_w, dt);
 
-            // 2b. 护盾：剪过载窗口、处理破盾恢复、延迟回充。必须排在伤害结算之前，
+            // 3b. 护盾：剪过载窗口、处理破盾恢复、延迟回充。必须排在伤害结算之前，
             //     否则同一 tick 先被打再回充，玩家会看到「刚回的那点又没了」。
             ShieldSystem.Step(_w, dt);
-
-            // 3. 敌舰 AI 读上一 tick 末状态生成意图。
-            SimpleEnemyController.Step(_w);
 
             // 4. 物理与武器，顺序固定。
             //    Targeting 紧跟 Movement：位置/速度是本 tick 最新的，解出的提前量才不回退一帧。

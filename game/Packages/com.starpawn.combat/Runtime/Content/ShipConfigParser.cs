@@ -2,10 +2,14 @@
 //
 // 职责边界（T01b 刻意做小）：
 //   做：读 content/ships/*.json 的 combat 段，字段缺一个就报错，不做静默补缺。
-//   不做：mod 支持、热重载、schema 校验、本地化名。那些属完整加载器，以后整体替换它。
+//   不做：mod 支持、热重载、本地化名。那些属完整加载器，以后整体替换它。
 //
-// 为什么缺字段要报错而不是给默认值：这个加载器存在的全部意义，就是让 JSON 成为唯一真源。
-// 缺字段静默补缺省，等于在代码里又藏了一份数值表，调参时改 JSON 不生效而没人知道为什么。
+// 两条都不能破的规矩：
+//   1. 缺字段必须报错。静默补缺省等于在代码里又藏一份数值表，调参时改 JSON 不生效而没人知道为什么。
+//   2. **先校验原始值，再构造对象。** 契约层的构造函数会把非法值「修正」掉（1.5 截成 1、
+//      负数改成 1、窗口 -1 改成 1.5 秒），于是配置能「解析成功」，跑起来的却不是作者填的数。
+//      这种错只会在战斗里表现为「舰船怪怪的」，比读不进来难查一个量级。
+//      所以下面所有数值都过 有限性 + 区间 两道检查，越界直接记错，不等构造。
 //
 // 单位与 JSON 一致：km、km/s、km/s²、度、度/秒、能量点。
 
@@ -18,7 +22,7 @@ namespace StarPawn.Combat.Content
     public static class ShipConfigParser
     {
         /// <summary>
-        /// 解析一份舰体 JSON。成功时 stats 非空；失败时 errors 说明缺了什么或哪里不合法。
+        /// 解析一份舰体 JSON。成功时 stats 非空；失败时 errors 说明缺了什么或哪个值越界。
         /// </summary>
         public static bool TryParse(string json, out string id, out ResolvedShipStats stats, out string[] errors)
         {
@@ -51,81 +55,78 @@ namespace StarPawn.Combat.Content
             }
 
             // ---- 舰体与武器 ----
-            float hp = (float)combat.Num("hp", required: true);
-            float maxSpeed = (float)combat.Num("maxSpeed", required: true);
-            float turnRate = (float)combat.Num("turnRate", required: true);
-            float gunRange = (float)combat.Num("gunRange", required: true);
-            float shellVelocity = (float)combat.Num("shellVelocity", required: true);
-            float reload = (float)combat.Num("reloadSeconds", required: true);
-            float gunDamage = (float)combat.Num("gunDamage", required: true);
-            float accuracy = (float)combat.Num("accuracy", required: true);
-            float maxSpread = (float)combat.Num("maxSpreadDeg", fallback: ResolvedShipStats.DefaultMaxSpreadDeg);
-            float hullRadius = (float)combat.Num("hullRadiusKm", fallback: ResolvedShipStats.HullRadiusKmFromHull(hp));
+            // 全部先落成原始值并校验，构造放到 log 为空之后。
+            float hp = (float)combat.Positive("hp");
+            float maxSpeed = (float)combat.Positive("maxSpeed");
+            float turnRate = (float)combat.Positive("turnRate");
+            float gunRange = (float)combat.Positive("gunRange");
+            float shellVelocity = (float)combat.Positive("shellVelocity");
+            float reload = (float)combat.Positive("reloadSeconds");
+            float gunDamage = (float)combat.NonNeg("gunDamage");
+            float accuracy = (float)combat.Unit("accuracy");
+            float maxSpread = (float)combat.OptNonNeg("maxSpreadDeg", ResolvedShipStats.DefaultMaxSpreadDeg);
+            float hullRadius = (float)combat.OptPositive("hullRadiusKm", ResolvedShipStats.HullRadiusKmFromHull(hp));
 
             // ---- 机动 ----
             Node man;
             if (!combat.Child("maneuver", out man)) return Fail(out errors, log, id + ": 缺少 maneuver 段");
-            var maneuver = new ManeuverProfile(
-                (float)man.Num("maxThrustKmS2", required: true),
-                (float)man.Num("yawRateDps", required: true),
-                (float)man.Num("pitchRateDps", required: true),
-                (float)man.Num("rollRateDps", required: true),
-                (float)man.Num("yawAccelDps2", required: true),
-                (float)man.Num("pitchAccelDps2", required: true),
-                (float)man.Num("rollAccelDps2", required: true));
+            float maxThrust = (float)man.Positive("maxThrustKmS2");
+            float yawRate = (float)man.Positive("yawRateDps");
+            float pitchRate = (float)man.Positive("pitchRateDps");
+            float rollRate = (float)man.Positive("rollRateDps");
+            float yawAccel = (float)man.Positive("yawAccelDps2");
+            float pitchAccel = (float)man.Positive("pitchAccelDps2");
+            float rollAccel = (float)man.Positive("rollAccelDps2");
 
             // ---- 能源 ----
             Node pow;
             if (!combat.Child("power", out pow)) return Fail(out errors, log, id + ": 缺少 power 段");
-            var power = new PowerProfile(
-                (float)pow.Num("capacity", required: true),
-                (float)pow.Num("regenPerSecond", required: true),
-                (float)pow.Num("propulsionDrainPerSecond", required: true),
-                (float)pow.Num("turnDrainPerSecond", required: true),
-                (float)pow.Num("weaponDrainPerShot", required: true),
-                (float)pow.Num("restartFraction", required: true));
+            float capacity = (float)pow.Positive("capacity");
+            float regen = (float)pow.NonNeg("regenPerSecond");
+            float propulsionDrain = (float)pow.NonNeg("propulsionDrainPerSecond");
+            float turnDrain = (float)pow.NonNeg("turnDrainPerSecond");
+            float weaponDrain = (float)pow.NonNeg("weaponDrainPerShot");
+            float restartFraction = (float)pow.OpenUnit("restartFraction");
 
             // ---- 防御 ----
             Node armorNode;
             if (!combat.Child("armor", out armorNode)) return Fail(out errors, log, id + ": 缺少 armor 段");
-            var armor = new ArmorProfile(
-                (float)armorNode.Num("beamDr", required: true),
-                (float)armorNode.Num("kineticDr", required: true));
+            float beamDr = (float)armorNode.Unit("beamDr");
+            float kineticDr = (float)armorNode.Unit("kineticDr");
 
             Node shieldNode;
             if (!combat.Child("shield", out shieldNode)) return Fail(out errors, log, id + ": 缺少 shield 段");
-            var shield = new ShieldProfile(
-                (float)shieldNode.Num("frontDr", required: true),
-                (float)shieldNode.Num("sideDr", required: true),
-                (float)shieldNode.Num("rearDr", required: true),
-                (float)shieldNode.Num("turnLossFactor", required: true),
-                (float)shieldNode.Num("regenDelaySeconds", required: true),
-                (float)shieldNode.Num("bufferRegenPerSecond", required: true),
-                (float)shieldNode.Num("drainPerDamage", required: true),
-                (float)shieldNode.Num("recoverFraction", required: true));
+            float frontDr = (float)shieldNode.Unit("frontDr");
+            float sideDr = (float)shieldNode.Unit("sideDr");
+            float rearDr = (float)shieldNode.Unit("rearDr");
+            float turnLossFactor = (float)shieldNode.Unit("turnLossFactor");
+            float regenDelay = (float)shieldNode.NonNeg("regenDelaySeconds");
+            float bufferRegen = (float)shieldNode.NonNeg("bufferRegenPerSecond");
+            float drainPerDamage = (float)shieldNode.NonNeg("drainPerDamage");
+            float recoverFraction = (float)shieldNode.OpenUnit("recoverFraction");
 
             Node overloadNode;
             if (!combat.Child("overload", out overloadNode)) return Fail(out errors, log, id + ": 缺少 overload 段");
-            var overload = new OverloadProfile(
-                (float)overloadNode.Num("threshold", required: true),
-                (float)overloadNode.Num("windowSeconds", required: true),
-                (float)overloadNode.Num("bufferCapacity", required: true),
-                (float)overloadNode.Num("breakSeconds", required: true));
+            float threshold = (float)overloadNode.Positive("threshold");
+            float windowSeconds = (float)overloadNode.Positive("windowSeconds");
+            float bufferCapacity = (float)overloadNode.Positive("bufferCapacity");
+            float breakSeconds = (float)overloadNode.Positive("breakSeconds");
 
+            // 缺字段与越界的错都收在这里，一次报全：改配置的人不希望改一个跑一次。
             if (log.Count > 0) return Fail(out errors, log, null);
 
-            // 构造之后再查一遍「会不会让 BattleRules.ValidateStats 失败」的量。
-            // 配置读得进来但值不合法，比读不进来更难查——它只会在战斗里表现为舰船不动。
-            if (hp <= 0f) log.Add(id + ": hp 必须为正，当前 " + hp);
-            if (hullRadius <= 0f) log.Add(id + ": hullRadiusKm 必须为正，当前 " + hullRadius);
-            if (maxSpeed <= 0f) log.Add(id + ": maxSpeed 必须为正，当前 " + maxSpeed);
-            if (turnRate <= 0f) log.Add(id + ": turnRate 必须为正，当前 " + turnRate);
-            if (shellVelocity <= 0f) log.Add(id + ": shellVelocity 必须为正，当前 " + shellVelocity);
-            if (gunRange <= 0f) log.Add(id + ": gunRange 必须为正，当前 " + gunRange);
+            var maneuver = new ManeuverProfile(maxThrust,
+                yawRate, pitchRate, rollRate, yawAccel, pitchAccel, rollAccel);
+            var power = new PowerProfile(capacity, regen, propulsionDrain, turnDrain, weaponDrain, restartFraction);
+            var armor = new ArmorProfile(beamDr, kineticDr);
+            var shield = new ShieldProfile(frontDr, sideDr, rearDr,
+                turnLossFactor, regenDelay, bufferRegen, drainPerDamage, recoverFraction);
+            var overload = new OverloadProfile(threshold, windowSeconds, bufferCapacity, breakSeconds);
+
+            // 构造后只剩「跨字段」的一致性：单个值都合法，组合起来才荒谬的那种。
             if (overload.BufferCapacity < overload.Threshold)
                 log.Add(id + ": 缓冲池(" + overload.BufferCapacity + ") 小于过载阈值(" + overload.Threshold +
                         ")，一击就会破盾");
-            if (accuracy < 0f || accuracy > 1f) log.Add(id + ": accuracy 必须在 [0,1]，当前 " + accuracy);
             if (log.Count > 0) return Fail(out errors, log, null);
 
             stats = new ResolvedShipStats(
@@ -162,6 +163,9 @@ namespace StarPawn.Combat.Content
         /// <summary>
         /// 带路径的取值器：缺字段时报出「combat.shield.frontDr 缺失」这种能直接定位的错，
         /// 而不是在调用点拼字符串（拼多了总有一处漏路径）。
+        ///
+        /// 每个取值方法都同时是校验方法：有限性 + 区间，越界就记错并返回 0。
+        /// 返回 0 只是为了让调用方不必处理 null——只要 log 非空，函数一定在构造对象前就 return false。
         /// </summary>
         private sealed class Node
         {
@@ -184,18 +188,65 @@ namespace StarPawn.Combat.Content
                 return null;
             }
 
-            public double Num(string key, bool required)
+            /// <summary>正数。血量、半径、推力、射程这类「为零就没有意义」的量。</summary>
+            public double Positive(string key)
             {
                 double v;
-                if (_values != null && MiniJson.TryGetNumber(_values, key, out v)) return v;
-                if (required) _errors.Add(Where(key) + " 缺失或不是数字");
-                return 0d;
+                if (!TryNumber(key, out v)) { _errors.Add(Where(key) + " 缺失或不是有限数"); return 0d; }
+                if (v <= 0d) { _errors.Add(Where(key) + " 必须为正，当前 " + Fmt(v)); return 0d; }
+                return v;
             }
 
-            public double Num(string key, float fallback)
+            /// <summary>非负数。0 有明确含义的量：再生、耗电、延迟。</summary>
+            public double NonNeg(string key)
             {
                 double v;
-                return _values != null && MiniJson.TryGetNumber(_values, key, out v) ? v : fallback;
+                if (!TryNumber(key, out v)) { _errors.Add(Where(key) + " 缺失或不是有限数"); return 0d; }
+                if (v < 0d) { _errors.Add(Where(key) + " 不能为负，当前 " + Fmt(v)); return 0d; }
+                return v;
+            }
+
+            /// <summary>[0,1]。减伤比例、精度这类「是比例不是倍数」的量。</summary>
+            public double Unit(string key)
+            {
+                double v;
+                if (!TryNumber(key, out v)) { _errors.Add(Where(key) + " 缺失或不是有限数"); return 0d; }
+                if (v < 0d || v > 1d)
+                {
+                    _errors.Add(Where(key) + " 必须在 [0,1]（是减伤比例，不是倍数），当前 " + Fmt(v));
+                    return 0d;
+                }
+                return v;
+            }
+
+            /// <summary>(0,1]。比例但 0 无意义：重启阈值、破盾恢复比例——填 0 会被契约层悄悄换成缺省值。</summary>
+            public double OpenUnit(string key)
+            {
+                double v;
+                if (!TryNumber(key, out v)) { _errors.Add(Where(key) + " 缺失或不是有限数"); return 0d; }
+                if (v <= 0d || v > 1d)
+                {
+                    _errors.Add(Where(key) + " 必须在 (0,1]，当前 " + Fmt(v));
+                    return 0d;
+                }
+                return v;
+            }
+
+            /// <summary>缺了用 fallback，给了就必须是正数（缺省不能顺便放过坏值）。</summary>
+            public double OptPositive(string key, double fallback)
+            {
+                double v;
+                if (!TryNumber(key, out v)) return fallback;
+                if (v <= 0d) { _errors.Add(Where(key) + " 必须为正，当前 " + Fmt(v)); return fallback; }
+                return v;
+            }
+
+            public double OptNonNeg(string key, double fallback)
+            {
+                double v;
+                if (!TryNumber(key, out v)) return fallback;
+                if (v < 0d) { _errors.Add(Where(key) + " 不能为负，当前 " + Fmt(v)); return fallback; }
+                return v;
             }
 
             public bool Child(string key, out Node child)
@@ -209,6 +260,18 @@ namespace StarPawn.Combat.Content
                 child = null;
                 return false;
             }
+
+            /// <summary>取到数且是有限数才返回 true。缺字段与非有限数在这里合流，调用方各报各的话。</summary>
+            private bool TryNumber(string key, out double v)
+            {
+                if (_values != null && MiniJson.TryGetNumber(_values, key, out v))
+                    return !double.IsNaN(v) && !double.IsInfinity(v);
+                v = 0d;
+                return false;
+            }
+
+            private static string Fmt(double v)
+                => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
 
             private string Where(string key)
                 => (_path.Length == 0 ? "" : _path + ".") + key;

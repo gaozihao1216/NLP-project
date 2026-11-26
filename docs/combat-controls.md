@@ -219,16 +219,21 @@ Energy ≥ Capacity × Restart    → 解锁，事件 PowerRestored
 
 ### 5.2 一次开火的检查顺序
 
+顺序是硬约束：**先确认真打得出去，再从储能池抽电**。任何一步失败都"什么都不改"——不扣电、不进装填、不动随机序列。
+
 ```text
 1 装填     未完成 → 事件 NotReady
-2 能源     扣不出 WeaponDrainPerShot → 事件 PowerLow
-3 射程     瞄准点超过 GunRangeKm → 事件 OutOfRange
+2 瞄准/射程 无瞄准点则沿舰首打；瞄准点与舰体重合或超过 GunRangeKm → 事件 OutOfRange
+3 能源     扣不出 WeaponDrainPerShot → 事件 PowerLow
 4 射界     超出 ±15° → 钳到锥边，仍然开火，事件 OutOfArc
-5 散布     绕理想方向做锥形偏移，每次固定消费两个随机数
+5 散布     绕理想方向做锥形偏移，每次固定消费两个随机数（排在扣电之后，被拒的射击不扰动随机序列）
 6 生成弹   世界速度 = 舰速 + 炮口方向 × 弹速
 ```
 
-第 6 步的"舰速加上去"是提前量必须用相对速度的原因，见 6.2。[已实现]
+旧实现把"能源"放在"射程"之前：对射程外的目标连点开火，炮弹没出来、装填没进，电却每点一次少一笔。
+这类白扣最难被玩家归因，2026-11-26 已改正。[已实现]
+
+第 6 步的"舰速加上去"是提前量必须用相对速度的原因，见 6.2。
 
 ### 5.3 弹道与命中
 
@@ -380,7 +385,7 @@ relVel = targetVel − shooterVel
 | `X/Y/Z`、`Yaw/Pitch/Roll` | 位置与姿态 |
 | `Vx/Vy/Vz`、`Speed` | 速度矢量与标量（HUD 显示标量，拖尾用矢量） |
 | `PitchRate/YawRate/RollRate` | 三轴角速度（转向指示器） |
-| `Health01`、`Shield01`、`IsAlive` | 血条与盾条 |
+| `Health01`、`Buffer01`、`ShieldBroken`、`IsAlive` | 血条、缓冲池余量、破盾提示 |
 | `Reload01` | 装填环 |
 | `Energy01`、`PropulsionLocked`、`PowerMode` | 能源条、熄火提示、当前档位 |
 | `LockedTargetId`、`AimX/Y/Z`、`HasAim` | 锁定框与准星 |
@@ -401,7 +406,7 @@ relVel = targetVel − shooterVel
 | AI 不换目标、不绕后 | 战术验证不了 | A | 中 | T12 |
 | 过载缓冲已接 | 正面多了一个饱和解法 | A | — | 已完成（T07） |
 | 没有护航命令 | 玩家无法主动形成角分离包夹，H2 验不了 | A | 中 | T17 |
-| 能源只给主舰记账 | 敌舰等于无限电，压制类结论有假象 | A | 中 | T06 |
+| 全舰记账已接 | 敌舰不再等于无限电，压制类结论可以采信 | A | — | 已完成（T06） |
 | 鼠标只能给世界点 | 三维里一个像素定不了深度，锁定后的微调无法表达 | B | 中 | — |
 | 护航舰数值与配置不一致 | `CampaignFacade` 写死 200 血，JSON 是 120 | B | 低（加载器落地即消失） | — |
 

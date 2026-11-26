@@ -1,6 +1,7 @@
 // 唯一知道所有具体实现的地方。业务模块之间互不知晓。
 // 换假实现为真实现，只改这里，不碰 Application 和各模块。
 
+using System;
 using System.IO;
 using StarPawn.Application;
 using StarPawn.Combat.Content;
@@ -23,6 +24,11 @@ namespace StarPawn.Bootstrap
         /// <summary>
         /// 内容根目录。Unity 里用 Application.streamingAssetsPath 之类传入；
         /// 独立运行时可传 content/ 的实际路径。
+        /// <para>
+        /// 传了路径就表示「配置必须生效」：读不到、读错、一个舰都没解析出来都会抛
+        /// <see cref="InvalidOperationException"/>，不会悄悄退回内置数值。
+        /// 不传路径才走内置镜像，那是显式选择（编辑器里还没有内容、纯演示）。
+        /// </para>
         /// </summary>
         public static CampaignFacade Create(bool highCommandCoversSupply = true, string contentRoot = null)
         {
@@ -44,16 +50,32 @@ namespace StarPawn.Bootstrap
         }
 
         /// <summary>
-        /// 舰体配置源。有内容根就读 content/ships，没有就用内置镜像。
-        /// 装配期不吞错误：目录里一个舰都没读出来时退回内置表（不让编辑器里点开战斗直接崩），
-        /// 但那是「配置没生效」的状态，先用 ValidateContent 查清楚再跑数值。
+        /// 舰体配置源。
+        ///
+        /// 分成两种截然不同的情形，不要混：
+        ///   · 没给 contentRoot —— 这是「明确选择不读配置」，用内置镜像，不算兜底；
+        ///   · 给了 contentRoot —— 那就必须读到、且必须全对，任何错误直接抛。
+        ///
+        /// 旧实现把加载错误 `out _` 丢掉，全部失败时悄悄退回内置表：调参者改了 JSON、
+        /// 战斗里却还是旧数值，而且没有任何一处会说「你的配置没生效」。这比崩溃难查得多。
+        /// 内置表只服务于显式不传路径的测试与演示，不作为「路径给了但读坏了」的退路。
         /// </summary>
         private static IShipStatsSource ResolveShips(string contentRoot)
         {
             if (string.IsNullOrEmpty(contentRoot)) return ShipCatalog.Builtin;
 
-            var catalog = ShipCatalog.LoadDirectory(Path.Combine(contentRoot, "ships"), out _);
-            return catalog.Count > 0 ? (IShipStatsSource)catalog : ShipCatalog.Builtin;
+            string shipsDir = Path.Combine(contentRoot, "ships");
+            string[] errors;
+            var catalog = ShipCatalog.LoadDirectory(shipsDir, out errors);
+
+            if (errors.Length > 0)
+                throw new InvalidOperationException(
+                    "舰体配置读取失败（" + shipsDir + "）：\n  " + string.Join("\n  ", errors));
+
+            if (catalog.Count == 0)
+                throw new InvalidOperationException("舰体配置目录里没有任何可用舰体：" + shipsDir);
+
+            return catalog;
         }
 
         /// <summary>内容校验。返回空数组表示通过；调用方决定是报错还是只打日志。</summary>

@@ -709,9 +709,12 @@ internal static class Program
             var lockOk = rt.Submit(new LockTargetCommand { ShipId = ally, TargetId = new EntityId("enemy.near") });
             Check("锁定射程内敌舰成功", lockOk.Success, lockOk.Error.Code);
 
+            // 命令是入队语义（T03 定死的）：Submit 只把命令放进队列，下一个固定步开始才生效。
+            // 所以「提交后立刻读快照」必然读不到，必须 Step 一帧再断言。
+            rt.Step();
             var snap = rt.ReadSnapshot();
-            Check("快照记录锁定目标", snap.Ships[0].LockedTargetId == new EntityId("enemy.near"));
-            Check("锁定后立即有瞄准点", snap.Ships[0].HasAim);
+            Check("下一帧快照记录锁定目标", snap.Ships[0].LockedTargetId == new EntityId("enemy.near"));
+            Check("锁定的同一帧就有瞄准点", snap.Ships[0].HasAim);
 
             // 打几 tick，让目标横向移动，再看提前量是否领先于目标当前位置
             for (int i = 0; i < 30; i++) rt.Step();
@@ -730,6 +733,7 @@ internal static class Program
             Check("锁定友军被拒绝", !friendly.Success && friendly.Error.Code == "FRIENDLY_TARGET", friendly.Error.Code);
 
             var clear = rt.Submit(new LockTargetCommand { ShipId = ally });
+            rt.Step();     // 同样是入队语义：解除锁定也要等下一帧
             Check("空目标等于解除锁定",
                 clear.Success && rt.ReadSnapshot().Ships[0].LockedTargetId.IsEmpty);
         }
@@ -863,6 +867,9 @@ internal static class Program
                     Stats = stats,
                     IsAlly = ally,
                     Role = StarPawn.Combat.Contracts.SquadRole.Escort,
+                    // 血量必须给：IsAlive 就是 Hull > 0，不设 Hull 的舰在 PowerSystem 里会被当死人跳过，
+                    // 于是「护航舰掉电」这条断言测的是一个根本没参与结算的世界。
+                    Hull = stats.MaxHull,
                     Energy = stats.Power.Capacity,
                     ThrustSetpoint = 1f,        // 满推：耗电最高的档
                     LastHitTime = -999f
@@ -934,6 +941,241 @@ internal static class Program
                 Check("缺 shield.frontDr 时解析失败并指出字段",
                     !parsed && string.Join("; ", berrors).Contains("shield.frontDr"),
                     parsed ? "居然解析成功了" : string.Join("; ", berrors));
+            }
+        }
+
+        // 29. 过载窗口：旧记录没过期时不许重复扣，部分过期也不退还已扣量
+        {
+            var src = new EntityId("attacker");
+            var dir = new Vec3(0f, 0f, 1f);
+
+            // 29a. 窗口内两笔不重叠的部分：第二笔只能扣「新增的超额」。
+            //      不做 deducted 记账时，第二笔会按 excess=130 再扣一遍（池 300→90），
+            //      这是最容易犯的错，也是这条断言存在的理由。
+            {
+                var w = ShieldWorld();
+                var s = ShieldTarget(w, ShieldStats(frontDr: 1f, drainPerDamage: 0f, armorKinetic: 0f));
+                DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 200f, dir);
+                Check("单笔超额扣 80（300 → 220）", Math.Abs(s.ShieldBuffer - 220f) < 0.01f,
+                    s.ShieldBuffer.ToString("0.0"));
+                Advance(w, 0.2f);
+                DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 50f, dir);
+                Check("窗口未过期时第二笔只扣新增超额（220 → 170）",
+                    Math.Abs(s.ShieldBuffer - 170f) < 0.01f, s.ShieldBuffer.ToString("0.0"));
+            }
+
+            // 29b. 部分旧记录过期、窗口始终压着的连续命中。
+            //      每 0.5 s 一发 60，窗口 1.5 s 里恒压四发 = 240 > 阈值 120。
+            //      规则读法：超额是「状态」，每发只付自己带来的那份增量；过期清的是窗口信用，
+            //      不是缓冲池——所以池会一路减到 0，而不是停在 180。
+            {
+                var w = ShieldWorld();
+                var s = ShieldTarget(w, ShieldStats(frontDr: 1f, drainPerDamage: 0f, armorKinetic: 0f));
+
+                var afterHit = new float[7];
+                float prev = s.ShieldBuffer;
+                bool overcharged = false;
+                for (int hit = 0; hit < 7; hit++)
+                {
+                    DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 60f, dir);
+                    // 任何一发最多扣掉它自己带来的 60：扣多了就是把同一笔超额记了两遍。
+                    if (prev - s.ShieldBuffer > 60f + 1e-3f) overcharged = true;
+                    prev = s.ShieldBuffer;
+                    afterHit[hit] = s.ShieldBuffer;
+                    if (hit < 6 && !s.ShieldBroken) Advance(w, 0.5f);
+                }
+
+                Check("重叠命中每发最多扣自己那份（无重复记账）", !overcharged);
+                Check("前两发在阈值内不扣池（300）", Math.Abs(afterHit[1] - 300f) < 0.01f,
+                    afterHit[1].ToString("0.0"));
+                Check("第 3、4 发各扣自己那份（180）", Math.Abs(afterHit[3] - 180f) < 0.01f,
+                    afterHit[3].ToString("0.0"));
+                Check("窗口部分过期后不退还已扣、也不双倍扣（120）",
+                    Math.Abs(afterHit[4] - 120f) < 0.01f, afterHit[4].ToString("0.0"));
+                Check("持续饱和第 7 发打空池并破盾", s.ShieldBroken && s.ShieldBuffer <= 0.01f,
+                    "buffer=" + s.ShieldBuffer.ToString("0.0"));
+            }
+
+            // 29c. 阈值以内怎么叠都不扣：窗口压满 120 也仍是满池。
+            {
+                var w = ShieldWorld();
+                var s = ShieldTarget(w, ShieldStats(frontDr: 1f, drainPerDamage: 0f, armorKinetic: 0f));
+                for (int hit = 0; hit < 2; hit++)
+                {
+                    DamageResolver.ResolveHit(w, s, src, DamageChannel.Kinetic, 60f, dir);
+                    if (hit < 1) Advance(w, 0.5f);
+                }
+                Check("窗口累计恰在阈值上不扣池", Math.Abs(s.ShieldBuffer - 300f) < 0.01f,
+                    s.ShieldBuffer.ToString("0.0"));
+            }
+        }
+
+        // 30. 熄火后持续请求满推：能源必须还能回升并重新点火
+        {
+            // 极端剖面：40 容量 / 1.0 再生 / 5.0 满推耗电 → 约 10 s 见底；
+            // 阈值 25% = 10 点，熄火后再 10 s 才够重新点火。
+            var power = new PowerProfile(40f, 1.0f, 5.0f, 0f, 1f, 0.25f);
+            var stats = new ResolvedShipStats(200f, 200f, 30f, 10f, 180f, 220f, 3f, 50f, 2f, 0.9f,
+                0.30f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f, power);
+
+            var spec = new BattleStartSpec
+            {
+                BattleId = new EntityId("battle.pump"),
+                MissionId = "mission.smoke",
+                OriginSystemId = new EntityId("sys.kaila"),
+                TargetSystemId = new EntityId("sys.kaila"),
+                Allies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("ally.engine"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Flagship, SquadIndex = 0,
+                        Spawn = new SpawnPoint(0f, 0f, 0f, 0f, 0f, 0f),
+                        Stats = stats, InheritedHull01 = 1f
+                    }
+                },
+                Enemies = new[]
+                {
+                    new FleetEntry
+                    {
+                        ShipId = new EntityId("enemy.far"), DefinitionId = new ContentId("ship.test"),
+                        Role = StarPawn.Combat.Contracts.SquadRole.Escort, SquadIndex = 1,
+                        // 放到 5000 km 外：这条只测「熄火能否恢复」，不能让敌舰在测量窗口里开火，
+                        // 否则护盾抗伤电费会混进能源曲线，测出来的数就说不清是谁造成的。
+                        Spawn = new SpawnPoint(0f, 0f, 5000f, 180f, 0f, 0f),
+                        Stats = stats, InheritedHull01 = 1f
+                    }
+                },
+                BattlefieldLayout = "open_space",
+                Objective = new BattleObjective { Kind = "DestroyAll", TimeLimitSeconds = 600f },
+                RandomSeed = 17,
+                FixedStep = 1f / 30f
+            };
+
+            var rt = new StarPawn.Combat.Domain.CombatRuntime();
+            rt.Initialize(spec);
+            var helm = new HelmCommand { ShipId = new EntityId("ally.engine"), Thrust = 1f };
+
+            bool locked = false;
+            for (int i = 0; i < 600 && !locked; i++)
+            {
+                rt.Submit(helm);
+                rt.Step();
+                locked = rt.ReadSnapshot().Ships[0].PropulsionLocked;
+            }
+            Check("满推会把能源打到熄火", locked);
+
+            // 熄火之后每 tick 仍提交满推。旧实现会继续为这笔「不会发生的推力」收费，
+            // 能源死在 0 上，舰船永远回不到重启阈值——AI 每 tick 重写档位，最容易命中。
+            bool restored = false;
+            float energyAfter5s = -1f;
+            for (int i = 0; i < 900; i++)
+            {
+                rt.Submit(helm);
+                rt.Step();
+                foreach (var e in rt.DrainEvents()) if (e.Kind == "PowerRestored") restored = true;
+                if (i == 150) energyAfter5s = rt.ReadSnapshot().Ships[0].Energy01;
+            }
+            Check("熄火后仍请求满推，能源照样回升", energyAfter5s > 0.03f,
+                "5 s 后 energy=" + energyAfter5s.ToString("0.000"));
+            Check("回充过阈值后能重新点火", restored);
+        }
+
+        // 31. 开火失败不改任何状态：射程外连点不扣电、不出弹、不进装填
+        {
+            ResolvedShipStats gunStats = new ResolvedShipStats(
+                800f, 20f, 20f, 100f, 320f, 300f, 6f, 300f, 8f, 0.92f,
+                0.37f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f,
+                new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 7f, 0.18f),
+                new ArmorProfile(0.20f, 0.35f),
+                new ShieldProfile(0.85f, 0.55f, 0.15f, 0.25f, 4f, 8f, 0.12f, 0.3f),
+                new OverloadProfile(120f, 1.5f, 300f, 6f));
+
+            StarPawn.Combat.Domain.CombatRuntime MakeGunRuntime(string battleId)
+            {
+                var spec = new BattleStartSpec
+                {
+                    BattleId = new EntityId(battleId),
+                    MissionId = "mission.smoke",
+                    OriginSystemId = new EntityId("sys.kaila"),
+                    TargetSystemId = new EntityId("sys.kaila"),
+                    Allies = new[]
+                    {
+                        new FleetEntry
+                        {
+                            ShipId = new EntityId("ally.gun"), DefinitionId = new ContentId("ship.g_cruiser"),
+                            Role = StarPawn.Combat.Contracts.SquadRole.Flagship, SquadIndex = 0,
+                            Spawn = new SpawnPoint(0f, 0f, 0f, 0f, 0f, 0f),
+                            Stats = gunStats, InheritedHull01 = 1f
+                        }
+                    },
+                    Enemies = new[]
+                    {
+                        new FleetEntry
+                        {
+                            ShipId = new EntityId("enemy.far"), DefinitionId = new ContentId("ship.a_patrol"),
+                            Role = StarPawn.Combat.Contracts.SquadRole.Escort, SquadIndex = 1,
+                            Spawn = new SpawnPoint(0f, 0f, 900f, 180f, 0f, 0f),
+                            Stats = gunStats, InheritedHull01 = 1f
+                        }
+                    },
+                    BattlefieldLayout = "open_space",
+                    Objective = new BattleObjective { Kind = "DestroyAll", TimeLimitSeconds = 300f },
+                    RandomSeed = 19,
+                    FixedStep = 1f / 30f
+                };
+                var rt = new StarPawn.Combat.Domain.CombatRuntime();
+                rt.Initialize(spec);
+                return rt;
+            }
+
+            var ally = new EntityId("ally.gun");
+            var outOfRange = MakeGunRuntime("battle.gun.far");
+            outOfRange.Submit(new AimCommand { ShipId = ally, WorldX = 0f, WorldY = 0f, WorldZ = 400f });
+            outOfRange.Submit(new FireCommand { ShipId = ally });
+            outOfRange.Step();
+            var miss = outOfRange.ReadSnapshot();
+
+            Check("射程外开火不扣电", Math.Abs(miss.Ships[0].Energy01 - 1f) < 1e-4f,
+                "energy=" + miss.Ships[0].Energy01.ToString("0.0000"));
+            Check("射程外开火不出弹", miss.Projectiles.Length == 0, "shells=" + miss.Projectiles.Length);
+            Check("射程外开火不进装填", Math.Abs(miss.Ships[0].Reload01 - 1f) < 1e-3f,
+                "reload=" + miss.Ships[0].Reload01.ToString("0.000"));
+
+            // 对照组：同样的输入换成射程内，必须扣电且出弹——否则上面三条可能是「根本没开火」而不是「被拦下」。
+            var inRange = MakeGunRuntime("battle.gun.near");
+            inRange.Submit(new AimCommand { ShipId = ally, WorldX = 0f, WorldY = 0f, WorldZ = 200f });
+            inRange.Submit(new FireCommand { ShipId = ally });
+            inRange.Step();
+            var hit = inRange.ReadSnapshot();
+            Check("射程内开火扣电并出弹",
+                hit.Projectiles.Length == 1 && hit.Ships[0].Energy01 < 1f,
+                "shells=" + hit.Projectiles.Length + " energy=" + hit.Ships[0].Energy01.ToString("0.0000"));
+        }
+
+        // 32. 非法配置必须报错，不能被契约层的 clamp 悄悄改成合法值
+        {
+            string shipsDir = FindContentShipsDir();
+            if (shipsDir == null)
+            {
+                Check("找得到 content/ships（非法配置用例）", false, "本机 cwd 不在仓库内");
+            }
+            else
+            {
+                string text = File.ReadAllText(Path.Combine(shipsDir, "g_cruiser.json"));
+                string id;
+                ResolvedShipStats st;
+                string[] errs;
+
+                bool ok = ShipConfigParser.TryParse(
+                    text.Replace("\"frontDr\": 0.85", "\"frontDr\": 1.5"), out id, out st, out errs);
+                Check("frontDr 填 1.5 报错（不能截成 1）",
+                    !ok && string.Join("; ", errs).Contains("shield.frontDr"), string.Join("; ", errs));
+
+                ok = ShipConfigParser.TryParse(
+                    text.Replace("\"threshold\": 120", "\"threshold\": -5"), out id, out st, out errs);
+                Check("threshold 填负数报错（不能改成 1）",
+                    !ok && string.Join("; ", errs).Contains("overload.threshold"), string.Join("; ", errs));
             }
         }
 

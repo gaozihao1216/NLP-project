@@ -76,8 +76,15 @@ xelatex -interaction=nonstopmode proposal.tex    # 第二遍稳定交叉引用
 最近一轮审查修掉了四处会影响真实战斗的错：敌舰 AI 意图排在能源结算之前（否则它转向不扣电）、
 熄火后为「不会执行的推力」继续扣电（导致永锁）、射程外开火白扣电、测试自己没设血量与命令时序。
 
+测试与仿真现在**真在跑**：`tools/SmokeTests` 32 个场景块 / 108 条断言全绿，
+`.github/workflows/smoke.yml` 在 ubuntu 上自动执行同一套检查（编译 22 个工程 + 冒烟 + 300 s 仿真）。
+跑通的第一件事是把一个旧结论推翻了：等效二维模型说"2v3 六个种子 69–129 s 全胜"，
+真实引擎跑出来是三个种子各 300 s **零击沉**——双方以 20–32 km/s 交汇，一次开窗只有 3–4 s，
+装填却要 3.2–6 s，打完就飞过去。所以下一步的瓶颈是运动与火控（T10 炮塔化、T12 AI 绕后），
+而不是护盾或伤害。细节见 `docs/phase1-tasks.md` 第 6 节。
+
 下一步：按 `docs/vertical-slice-plan.md` 做最小闭环——Unity 侧场景与输入层、任务日志运行时、星图两节点 UI。
-战斗数值验证见 `tools/CombatSimCli`（本机执行被策略拦截，换机运行）。
+战斗数值验证：`dotnet run --project tools/CombatSimCli -- --seed N`。
 
 ## 说明
 

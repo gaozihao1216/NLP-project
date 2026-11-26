@@ -1,0 +1,49 @@
+name: smoke
+
+# 这个仓库的验证只有一件事：编译得过 + 断言全绿。
+# 跑在 ubuntu 上而不是 windows 上，是因为提交者本机有 Windows 代码完整性策略
+# （Smart App Control）会拦掉自己编译出来的 exe/dll，CI 反而是唯一稳定的验证环境。
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 装 .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # 逐个编译 22 个 asmdef 对应的验证工程。
+      # 不能只编 SmokeTests：它虽然引用了全部工程，但某个工程单独写坏时
+      # （比如新增 .cs 忘了写进 csproj，导致类型缺失）报错信息会指向别处。
+      - name: 编译 22 个验证工程
+        run: |
+          set -e
+          fail=0
+          for f in tools/BuildCheck/*.csproj; do
+            echo "::group::$f"
+            dotnet build "$f" -c Release -v q --nologo -warnaserror || fail=1
+            echo "::endgroup::"
+          done
+          echo "工程数：$(ls tools/BuildCheck/*.csproj | wc -l)"
+          exit $fail
+
+      # --warnaserror：这个仓库一直宣称 0 warning，用 CI 守住，别让它烂掉。
+      - name: 冒烟测试
+        run: dotnet run --project tools/SmokeTests -c Release
+
+      # 编译通过不等于跑得起来：这一步真的推 300 秒战斗，确认运动/弹道/结算没崩。
+      - name: 三维战斗仿真 300 秒
+        run: >
+          dotnet run --project tools/CombatSimCli -c Release --
+          --seed 20261122 --seconds 300 --quiet

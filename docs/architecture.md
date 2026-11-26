@@ -156,7 +156,12 @@ Unity 侧：用 Unity 2021.3 打开 `game/` 目录。`StarPawn.Presentation` 目
 
 **3. 胜利后果落地。** 架构里承诺的领域扩张与战略缴获现在真的执行：胜利时在同一事务内调用 `Navigation.ClaimSystem`，并按击沉数发放合金。Navigation 的快照与检查点也改成深拷贝，外部改快照不影响内部状态。
 
-本机应用控制策略仍阻止新生成 DLL 加载，测试编译通过但未能执行（0x800711C7）；换机运行 `cd tools/SmokeTests && dotnet run`。
+本机曾长期无法执行新生成的二进制：Windows 11 的智能应用控制（Smart App Control）处于强制模式，
+锁的是**文件**而不是进程——`StarPawn.SmokeTests.exe` 与 `StarPawn.Application.dll` 都在
+`Microsoft-Windows-CodeIntegrity/Operational` 里留下 3033/3077 事件（策略
+`{0283ac0f-fff1-49ae-ada1-8a933130cad6}`），换 `UseAppHost=false`、走 `dotnet xxx.dll`、加自签名
+全都不管用。2026-11-26 关闭该功能后 `cd tools/SmokeTests && dotnet run` 正常，32 块 108 条断言全绿。
+仓库内的 `.github/workflows/smoke.yml` 把这件事搬到 ubuntu 上做，任何人本机环境再出问题都不影响验证。
 
 ## 审查修复记录（2026-11-22）
 
@@ -310,10 +315,11 @@ relVel = targetVel - shooterVel
   双舰三轮破盾、破盾那一击不穿透、6 s 后只回三成、4 s 延迟回充、
   过载窗口「未过期不重复扣 / 部分过期不退还 / 阈值内不扣」、射程外开火不改任何状态、
   配置解析与内置镜像逐字段一致、越界与负数配置报错。
-- 本机应用控制策略（0x800711C7，Defender 拦截新生成二进制）仍然阻止执行，CLI 与 SmokeTests **只能编译不能运行**。
-  换机执行：`dotnet run --project tools/CombatSimCli`、`cd tools/SmokeTests && dotnet run`。
-- 为确认数值可用，用等效的二维模型复算了同一场 2v3：6 个随机种子全部取胜，用时 69–129 s，无僵局；
-  关闭提前量则 300 s 打不死任何一艘。
+- 32 块（108 条断言）**已在 2026-11-26 实际执行并通过**，CI 见 `.github/workflows/smoke.yml`。
+  此前一直只有编译验证，原因是 Smart App Control 锁了新生成的二进制（见第 6 节的说明）。
+- 首次真跑暴露的问题不在断言，在**资产平衡**：三个种子各跑 300 s，**0 击沉**（明细见
+  `phase1-tasks.md` 的「首次实测」一节）。下面「六个种子 69–129 s 全胜」那条来自等效二维模型，
+  **已被真实引擎推翻**，不要再引用——它建模时没有三面 DR，也没有「交汇窗口只有 3–4 s」这件事。
 - 能源曲线同样离线复算（主舰 120 点容量、再生 3.2/s、满推耗电 4.4/s）：
 
   | 状态 | 首次见底 |

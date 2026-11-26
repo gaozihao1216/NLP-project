@@ -44,6 +44,9 @@ internal static class Program
             Id = new EntityId("target"),
             Stats = stats,
             Pos = Vec3.Zero,
+            // 必须给血量：IsAlive 是 Hull > 0，漏了就整个 ResolveHit 在入口处返回全零，
+            // 断言会以「DR 全是 0」的形式失败，看起来像结算逻辑坏了。
+            Hull = stats.MaxHull,
             ShieldBuffer = stats.Overload.BufferCapacity,
             // 全舰记账后每艘舰都有真实储能：默认满电，要测「电不够」就显式传 energy。
             Energy = energy >= 0f ? energy : stats.Power.Capacity,
@@ -69,13 +72,13 @@ internal static class Program
     /// 缓冲池、阈值、DR 全显式给，避免测试跟着缺省推导漂移。
     /// </summary>
     private static ResolvedShipStats ShieldStats(float frontDr = 0.85f, float drainPerDamage = 0.12f,
-        float armorKinetic = 0.35f)
+        float armorKinetic = 0.35f, float sideDr = 0.55f, float rearDr = 0.15f)
         => new ResolvedShipStats(
             800f, 20f, 20f, 100f, 320f, 300f, 6f, 300f, 8f, 0.92f,
             0.37f, new ManeuverProfile(2.5f, 20f, 12f, 36f, 80f, 48f, 144f), 1f,
             new PowerProfile(120f, 3.2f, 4.4f, 0.9f, 7f, 0.18f),
             new ArmorProfile(0.20f, armorKinetic),
-            new ShieldProfile(frontDr, frontDr, frontDr, 0.25f, 4f, 8f, drainPerDamage, 0.3f),
+            new ShieldProfile(frontDr, sideDr, rearDr, 0.25f, 4f, 8f, drainPerDamage, 0.3f),
             new OverloadProfile(120f, 1.5f, 300f, 6f));
 
     private static GameServices Build(out CampaignFacade facade)
@@ -443,12 +446,14 @@ internal static class Program
             Check("提前量可解", ok);
 
             // 按瞄准方向发射，让炮弹自己飞，检查是否与目标相遇
+            // 采样间隔决定精度：相对速度约 220 km/s，5 ms 一格 ⇒ 量化误差约 1.1 km，
+            // 用 0.05 s 一格会得到 4 km 以上的"偏差"，那是采样粗，不是提前量错。
             Vec3 dir = (aim - shooterPos).Normalized;
             Vec3 shellVel = shooterVel + dir * 220f;
             float bestMiss = float.MaxValue;
-            for (int i = 1; i <= 60; i++)
+            for (int i = 1; i <= 1500; i++)
             {
-                float time = i * 0.05f;
+                float time = i * 0.002f;
                 Vec3 shellAt = shooterPos + shellVel * time;
                 Vec3 targetAt = targetPos + targetVel * time;
                 float miss = (shellAt - targetAt).Length;
@@ -505,10 +510,13 @@ internal static class Program
                     if (e.Kind == "Fire") sawFire = true;
             }
             var snap = rt.ReadSnapshot();
-            bool closedIn = snap.Ships[1].Z < 119f;
+            // 敌舰 AI 的行为是「远则满推、进入 0.7 射程后回落保持距离」，所以正确的断言是
+            // 「留在有效射程内且不贴脸」，不是「一路顶到玩家面前」。
+            float ez = snap.Ships[1].Z;
+            bool holdsStandoff = ez > 60f && ez < 171f;
             bool hurt = snap.Ships[0].ShieldBroken || snap.Ships[0].Buffer01 < 1f || snap.Ships[0].Health01 < 1f;
             Check("真实战斗：敌舰开火", sawFire);
-            Check("真实战斗：敌舰主动接近", closedIn, "z=" + snap.Ships[1].Z.ToString("0.0"));
+            Check("真实战斗：敌舰保持 0.7 射程站位（不贴脸也不脱战）", holdsStandoff, "z=" + ez.ToString("0.0"));
             Check("真实战斗：命中造成掉血", hurt,
                 "池=" + snap.Ships[0].Buffer01.ToString("0.00") + " 破盾=" + snap.Ships[0].ShieldBroken +
                 " hull=" + snap.Ships[0].Health01.ToString("0.00"));

@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Foundation.csproj" />
+    <ProjectReference Include="Combat_Content.csproj" />
     <ProjectReference Include="Navigation_Contracts.csproj" />
     <ProjectReference Include="Fleet_Contracts.csproj" />
     <ProjectReference Include="Economy_Contracts.csproj" />

@@ -8,8 +8,11 @@
     <NoWarn>CS0169;CS0649</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <!-- 表现层源码（Unity 侧由 asmdef 编译；这里用 UnityEngine 桩做离线编译验证） -->
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Packages/com.starpawn.presentation/Runtime/**/*.cs" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="UnityEngine.CoreModule/UnityEngine.CoreModule.csproj" />
     <ProjectReference Include="Application.csproj" />
     <ProjectReference Include="Navigation_Contracts.csproj" />
     <ProjectReference Include="Fleet_Contracts.csproj" />

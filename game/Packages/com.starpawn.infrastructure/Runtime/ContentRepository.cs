@@ -3,11 +3,60 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
+using StarPawn.Combat.Content;
 using StarPawn.Foundation;
 
 namespace StarPawn.Infrastructure
 {
+    // 复用纯 C# 内容解析器，避免 Unity 缺少 System.Text.Json 依赖。
+    internal enum ContentJsonKind { Other, Object, Array, String, Number }
+
+    internal readonly struct ContentJsonValue
+    {
+        private readonly object _value;
+        private ContentJsonValue(object value) { _value = value; }
+        public ContentJsonKind ValueKind => _value is Dictionary<string, object> ? ContentJsonKind.Object
+            : _value is List<object> ? ContentJsonKind.Array
+            : _value is string ? ContentJsonKind.String
+            : _value is double ? ContentJsonKind.Number : ContentJsonKind.Other;
+
+        public static ContentJsonValue Parse(string text)
+        {
+            if (!MiniJson.TryParse(text, out var value, out var error))
+                throw new FormatException(error);
+            return new ContentJsonValue(value);
+        }
+
+        public bool TryGetProperty(string key, out ContentJsonValue value)
+        {
+            if (_value is Dictionary<string, object> obj && obj.TryGetValue(key, out var found))
+            { value = new ContentJsonValue(found); return true; }
+            value = default;
+            return false;
+        }
+
+        public IEnumerable<KeyValuePair<string, ContentJsonValue>> EnumerateObject()
+        {
+            foreach (var pair in (Dictionary<string, object>)_value)
+                yield return new KeyValuePair<string, ContentJsonValue>(pair.Key, new ContentJsonValue(pair.Value));
+        }
+
+        public IEnumerable<ContentJsonValue> EnumerateArray()
+        {
+            foreach (var value in (List<object>)_value) yield return new ContentJsonValue(value);
+        }
+
+        public string GetString() => (string)_value;
+        public int GetInt32()
+        {
+            double value = (double)_value;
+            if (double.IsNaN(value) || double.IsInfinity(value) || value < int.MinValue
+                || value > int.MaxValue || value != Math.Truncate(value))
+                throw new FormatException("JSON 数值必须是 Int32 范围内的整数");
+            return (int)value;
+        }
+    }
+
     public interface IContentValidator
     {
         string[] Validate(string contentRoot);
@@ -39,7 +88,7 @@ namespace StarPawn.Infrastructure
             var nodeIds = new HashSet<string>();       // 剧情节点（stories/*.json 的 nodes 键）
             var starNodes = new HashSet<string>();     // 星图节点
             var questIds = new HashSet<string>();
-            var docs = new List<JsonElement>();
+            var docs = new List<ContentJsonValue>();
 
             foreach (var sub in SubDirs)
             {
@@ -47,23 +96,22 @@ namespace StarPawn.Infrastructure
                 if (!Directory.Exists(dir)) continue;
                 foreach (var file in Directory.GetFiles(dir, "*.json"))
                 {
-                    JsonElement root;
+                    ContentJsonValue root;
                     try
                     {
-                        using (var stream = File.OpenRead(file))
-                            root = JsonDocument.Parse(stream).RootElement.Clone();
+                        root = ContentJsonValue.Parse(File.ReadAllText(file));
                     }
                     catch (Exception ex)
                     {
                         errors.Add($"JSON 解析失败 {Path.GetFileName(file)}: {ex.Message}");
                         continue;
                     }
-                    docs.Add(root);
                     var name = Path.GetFileName(file);
 
-                    if (root.ValueKind != JsonValueKind.Object)
+                    if (root.ValueKind != ContentJsonKind.Object)
                     { errors.Add($"{name}: 根节点必须是对象"); continue; }
 
+                    docs.Add(root);
                     string id = GetString(root, "id");
                     if (string.IsNullOrWhiteSpace(id))
                         errors.Add($"{name}: 缺少 id");
@@ -73,11 +121,11 @@ namespace StarPawn.Infrastructure
                     if (sub == "quests" && !string.IsNullOrEmpty(id)) questIds.Add(id);
 
                     if (sub == "stories" && root.TryGetProperty("nodes", out var nodes)
-                        && nodes.ValueKind == JsonValueKind.Object)
-                        foreach (var p in nodes.EnumerateObject()) nodeIds.Add(p.Name);
+                        && nodes.ValueKind == ContentJsonKind.Object)
+                        foreach (var p in nodes.EnumerateObject()) nodeIds.Add(p.Key);
 
                     if (sub == "star-maps" && root.TryGetProperty("nodes", out var sn)
-                        && sn.ValueKind == JsonValueKind.Array)
+                        && sn.ValueKind == ContentJsonKind.Array)
                         foreach (var n in sn.EnumerateArray())
                         {
                             var nid = GetString(n, "id");
@@ -89,29 +137,29 @@ namespace StarPawn.Infrastructure
             // 引用检查：剧情 next/StoryNode、任务 references/navigation/prerequisites、舰队配置
             foreach (var root in docs)
             {
-                if (root.TryGetProperty("nodes", out var nodes) && nodes.ValueKind == JsonValueKind.Object)
+                if (root.TryGetProperty("nodes", out var nodes) && nodes.ValueKind == ContentJsonKind.Object)
                 {
                     foreach (var node in nodes.EnumerateObject())
                     {
-                        if (node.Value.ValueKind != JsonValueKind.Object) continue;
-                        if (node.Value.TryGetProperty("choices", out var choices) && choices.ValueKind == JsonValueKind.Array)
+                        if (node.Value.ValueKind != ContentJsonKind.Object) continue;
+                        if (node.Value.TryGetProperty("choices", out var choices) && choices.ValueKind == ContentJsonKind.Array)
                             foreach (var c in choices.EnumerateArray())
                             {
                                 var next = GetString(c, "next");
                                 if (!string.IsNullOrEmpty(next) && !nodeIds.Contains(next))
-                                    errors.Add($"剧情节点 {node.Name} 的选项指向不存在的节点: {next}");
+                                    errors.Add($"剧情节点 {node.Key} 的选项指向不存在的节点: {next}");
                             }
                     }
                 }
 
-                if (root.TryGetProperty("navigation", out var nav) && nav.ValueKind == JsonValueKind.Object)
+                if (root.TryGetProperty("navigation", out var nav) && nav.ValueKind == ContentJsonKind.Object)
                 {
                     var target = GetString(nav, "targetSystemId");
                     if (!string.IsNullOrEmpty(target) && !starNodes.Contains(target))
                         errors.Add($"导航目标星系不存在: {target}");
                 }
 
-                if (root.TryGetProperty("references", out var refs) && refs.ValueKind == JsonValueKind.Object)
+                if (root.TryGetProperty("references", out var refs) && refs.ValueKind == ContentJsonKind.Object)
                 {
                     foreach (var key in new[] { "startStoryNode", "endStoryNode", "storyNode" })
                     {
@@ -124,8 +172,8 @@ namespace StarPawn.Infrastructure
                         errors.Add($"任务引用的 mission 不存在: {mission}");
                 }
 
-                if (root.TryGetProperty("prerequisites", out var pre) && pre.ValueKind == JsonValueKind.Object
-                    && pre.TryGetProperty("allOf", out var all) && all.ValueKind == JsonValueKind.Array)
+                if (root.TryGetProperty("prerequisites", out var pre) && pre.ValueKind == ContentJsonKind.Object
+                    && pre.TryGetProperty("allOf", out var all) && all.ValueKind == ContentJsonKind.Array)
                     foreach (var p in all.EnumerateArray())
                     {
                         var type = GetString(p, "type");
@@ -142,9 +190,9 @@ namespace StarPawn.Infrastructure
             return errors.ToArray();
         }
 
-        private static string GetString(JsonElement obj, string key)
-            => obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(key, out var v)
-               && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        private static string GetString(ContentJsonValue obj, string key)
+            => obj.ValueKind == ContentJsonKind.Object && obj.TryGetProperty(key, out var v)
+               && v.ValueKind == ContentJsonKind.String ? v.GetString() : null;
     }
 
     /// <summary>
@@ -164,10 +212,8 @@ namespace StarPawn.Infrastructure
             {
                 try
                 {
-                    using (var stream = File.OpenRead(file))
-                    using (var doc = JsonDocument.Parse(stream))
                     {
-                        var root = doc.RootElement;
+                        var root = ContentJsonValue.Parse(File.ReadAllText(file));
                         var id = GetStr(root, "id");
                         if (string.IsNullOrEmpty(id) || !root.TryGetProperty("rewards", out var rw)) continue;
                         _rewards[id] = new MissionReward
@@ -190,12 +236,12 @@ namespace StarPawn.Infrastructure
             return _rewards.TryGetValue(missionId, out r) ? r : null;
         }
 
-        private static string GetStr(JsonElement o, string k)
-            => o.ValueKind == JsonValueKind.Object && o.TryGetProperty(k, out var v)
-               && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
-        private static int GetInt(JsonElement o, string k)
-            => o.ValueKind == JsonValueKind.Object && o.TryGetProperty(k, out var v)
-               && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
+        private static string GetStr(ContentJsonValue o, string k)
+            => o.ValueKind == ContentJsonKind.Object && o.TryGetProperty(k, out var v)
+               && v.ValueKind == ContentJsonKind.String ? v.GetString() : null;
+        private static int GetInt(ContentJsonValue o, string k)
+            => o.ValueKind == ContentJsonKind.Object && o.TryGetProperty(k, out var v)
+               && v.ValueKind == ContentJsonKind.Number ? v.GetInt32() : 0;
     }
 
     /// <summary>单机存档，用一次性写入，避免半成品存档。</summary>

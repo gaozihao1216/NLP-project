@@ -1,0 +1,14 @@
+{
+  "name": "StarPawn.Presentation.Editor",
+  "rootNamespace": "StarPawn.Presentation.Editor",
+  "references": [
+    "StarPawn.Presentation",
+    "StarPawn.Bootstrap",
+    "StarPawn.Application"
+  ],
+  "autoReferenced": true,
+  "includePlatforms": [
+    "Editor"
+  ],
+  "noEngineReferences": false
+}

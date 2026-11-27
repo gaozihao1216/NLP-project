@@ -9,8 +9,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildProjectDirectory)/../../game/Assets/Game/Bootstrap/GameBootstrap.cs" />
+    <Compile Include="$(MSBuildProjectDirectory)/../../game/Assets/Game/Bootstrap/BattleDemoLauncher.cs" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="UnityEngine.CoreModule/UnityEngine.CoreModule.csproj" />
     <ProjectReference Include="Application.csproj" />
     <ProjectReference Include="Combat_Content.csproj" />
     <ProjectReference Include="Combat_Contracts.csproj" />

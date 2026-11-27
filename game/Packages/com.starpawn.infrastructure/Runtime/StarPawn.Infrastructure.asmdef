@@ -3,6 +3,7 @@
   "rootNamespace": "StarPawn.Infrastructure",
   "references": [
     "StarPawn.Foundation",
+    "StarPawn.Combat.Content",
     "StarPawn.Navigation.Contracts",
     "StarPawn.Fleet.Contracts",
     "StarPawn.Economy.Contracts",
